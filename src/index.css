@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 40 30% 98%;
+    --foreground: 0 0% 11%;
+    --surface: 30 20% 98%;
+    --surface-card: 45 40% 99%;
+    --primary: 154 6% 36%;
+    --primary-container: 135 7% 72%;
+    --border: 40 8% 89%;
+    --outline: 135 2% 46%;
+  }
+
+  body {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #FDFCF8;
+    color: #1b1c1c;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+.academic-shadow {
+  box-shadow: 0 4px 20px rgba(51, 51, 51, 0.04);
+}
+
+.academic-shadow-hover {
+  box-shadow: 0 8px 30px rgba(51, 51, 51, 0.08);
+}
+
+.paper-input {
+  background-color: #F9F6EE;
+  border: none;
+  border-bottom: 2px solid #E5E4E2;
+  transition: all 0.2s ease;
+}
+
+.paper-input:focus {
+  outline: none;
+  border-bottom-color: #56615a;
+  background-color: #ffffff;
+}
+
+/* Custom scrollbar */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Material symbol styling */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.material-symbols-outlined.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+

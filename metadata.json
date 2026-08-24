@@ -1,0 +1,6 @@
+{
+  "name": "Academic Sanctuary",
+  "description": "A collaborative digital library and classroom workspace for college cohorts to share notes, organize subjects, and prepare for exams.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
