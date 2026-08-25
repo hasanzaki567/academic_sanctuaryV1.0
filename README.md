@@ -17,6 +17,11 @@ A collaborative digital library and classroom workspace for college cohorts to s
 
 </div>
 
+##contributor
+
+hasan zaki 
+
+
 ## 🌟 Overview
 
 **Academic Sanctuary** is a full-stack web application designed for university students and faculty to collaboratively manage their academic lives. It provides a centralized hub where a class or cohort can share study materials, manage subject repositories, track exam schedules, post announcements, and build a structured knowledge base — all within a beautiful, modern interface.
