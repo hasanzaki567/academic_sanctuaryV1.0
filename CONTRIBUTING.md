@@ -1,5 +1,7 @@
 # 🤝 Contributing to Academic Sanctuary
-
+ 
+ hi 
+ 
 Thank you for your interest in contributing to **Academic Sanctuary**! We're thrilled to have you here. This document provides guidelines and instructions for contributing to this project.
 
 ---
