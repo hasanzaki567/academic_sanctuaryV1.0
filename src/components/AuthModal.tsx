@@ -41,8 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Demo accounts
-  const [demoUsers, setDemoUsers] = useState<any[]>([]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
@@ -70,15 +68,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setMode(initialMode);
     setErrorMessage(null);
   }, [initialMode, isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetch('/api/auth/demo-users')
-        .then((res) => res.json())
-        .then((data) => setDemoUsers(data))
-        .catch(() => {});
-    }
-  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -177,28 +166,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleQuickLogin = async (user: any) => {
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch('/api/auth/switch-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        confetti({ particleCount: 35, spread: 50 });
-        onAuthSuccess(data.user, data.classroom, `Logged in as ${data.user.name} (${data.user.role})`);
-        onClose();
-      }
-    } catch (err) {
-      setErrorMessage('Failed to switch demo account.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1b1c1c]/40 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-[#FDFCF8] border border-[#E5E4E2] rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
@@ -274,44 +241,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <span>{errorMessage}</span>
             </div>
           )}
-
-          {/* Quick Demo Switcher */}
-          <div className="bg-[#F0EDED]/80 border border-[#E5E4E2] rounded-2xl p-3.5">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-[#434844] uppercase tracking-wider flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-[#56642b]" />
-                Instant Demo Profiles (1-Click Test)
-              </span>
-              <span className="text-[10px] text-[#737874]">No password needed</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {demoUsers.slice(0, 4).map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => handleQuickLogin(u)}
-                  disabled={loading}
-                  className="p-2 bg-white hover:bg-[#d9e6dc]/40 border border-[#E5E4E2] rounded-xl text-left transition-all flex items-center gap-2.5 group cursor-pointer"
-                >
-                  <img
-                    src={u.avatar}
-                    alt={u.name}
-                    className="w-7 h-7 rounded-full object-cover border border-[#C3C8C3] flex-shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="min-w-0 flex-grow">
-                    <div className="text-xs font-bold text-[#1b1c1c] truncate group-hover:text-[#56615a]">
-                      {u.name}
-                    </div>
-                    <div className="text-[10px] text-[#737874] truncate">
-                      {u.role === 'super_admin' ? 'Super Admin' : u.role === 'admin' ? 'Admin' : 'Student'} • {u.classroomCode || 'Cohort'}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
 
           {mode === 'login' ? (
             /* Sign In Form */
