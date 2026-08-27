@@ -277,6 +277,8 @@ export default function App() {
     }
   };
 
+  const [savedMaterialIds, setSavedMaterialIds] = useState<string[]>(['mat-1', 'mat-4']);
+
   const handleDownloadMaterial = (material: Material) => {
     const content =
       material.contentSnippet ||
@@ -293,14 +295,36 @@ export default function App() {
     showToast(`Downloading "${material.title}" (${material.fileSize})...`);
   };
 
+  const handleSaveMaterial = (material: Material) => {
+    setSavedMaterialIds((prev) => {
+      const exists = prev.includes(material.id);
+      if (exists) {
+        showToast(`Removed "${material.title}" from your Saved Files.`);
+        return prev.filter((id) => id !== material.id);
+      } else {
+        confetti({
+          particleCount: 30,
+          spread: 50,
+          origin: { y: 0.8 },
+        });
+        showToast(`Saved "${material.title}" to your Saved Files collection!`);
+        return [...prev, material.id];
+      }
+    });
+  };
+
+  const handleAddToDrive = (material: Material) => {
+    showToast(`"${material.title}" added to your Google Drive folder!`);
+  };
+
   const nextExam = exams.length > 0 ? exams[0] : null;
 
   return (
-    <div className="min-h-screen bg-[#FDFCF8] text-[#1b1c1c] flex flex-col font-body-md antialiased selection:bg-[#d9e6dc] selection:text-[#1b1c1c]">
+    <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex flex-col font-body-md antialiased selection:bg-[#E0E7FF] selection:text-[#1E3A8A]">
       {/* Toast alert message */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#1b1c1c] text-white px-5 py-2.5 rounded-full text-xs font-semibold shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
-          <span className="w-2 h-2 rounded-full bg-[#d6e7a1]" />
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#0F172A] text-white px-5 py-2.5 rounded-full text-xs font-semibold shadow-xl border border-[#334155] flex items-center gap-2 animate-in fade-in slide-from-top-4">
+          <span className="w-2 h-2 rounded-full bg-[#F59E0B] animate-ping" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -364,6 +388,8 @@ export default function App() {
             onOpenUpload={(subId) => handleOpenUpload(subId)}
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
+            onSaveMaterial={handleSaveMaterial}
+            onAddToDrive={handleAddToDrive}
           />
         )}
 
@@ -400,12 +426,16 @@ export default function App() {
           />
         )}
 
-        {currentView === 'notes' && (
+        {(currentView === 'notes' || currentView === 'slides' || currentView === 'saved') && (
           <NotesRepositoryView
+            initialType={currentView === 'slides' ? 'materials' : currentView === 'saved' ? 'saved' : 'all'}
+            savedMaterialIds={savedMaterialIds}
             materials={materials}
             subjects={subjects}
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
+            onSaveMaterial={handleSaveMaterial}
+            onAddToDrive={handleAddToDrive}
             onOpenUpload={() => handleOpenUpload()}
           />
         )}
@@ -479,6 +509,8 @@ export default function App() {
         material={previewMaterial}
         onClose={() => setPreviewMaterial(null)}
         onDownload={handleDownloadMaterial}
+        onSaveMaterial={handleSaveMaterial}
+        onAddToDrive={handleAddToDrive}
       />
 
       <JoinClassroomModal
