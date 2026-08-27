@@ -7,6 +7,8 @@ interface DocumentReaderModalProps {
   isOpen: boolean;
   onClose: () => void;
   onDownload: (material: Material) => void;
+  onSaveMaterial?: (material: Material) => void;
+  onAddToDrive?: (material: Material) => void;
 }
 
 export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
@@ -14,11 +16,14 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
   isOpen,
   onClose,
   onDownload,
+  onSaveMaterial,
+  onAddToDrive,
 }) => {
   if (!isOpen || !material) return null;
 
   const [copied, setCopied] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
+  const [inDrive, setInDrive] = useState(false);
   const [likes, setLikes] = useState(material.downloadsCount);
   const [hasLiked, setHasLiked] = useState(false);
 
@@ -26,6 +31,21 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleBookmarkToggle = () => {
+    const next = !bookmarked;
+    setBookmarked(next);
+    if (onSaveMaterial) {
+      onSaveMaterial(material);
+    }
+  };
+
+  const handleDriveClick = () => {
+    setInDrive(true);
+    if (onAddToDrive) {
+      onAddToDrive(material);
+    }
   };
 
   const handleLike = () => {
@@ -39,19 +59,19 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in">
-      <div className="bg-[#FEFEFA] border border-[#E5E4E2] rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 bg-[#0F172A]/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in">
+      <div className="bg-white border border-[#E2E8F0] rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto">
         {/* Header */}
-        <div className="p-5 md:p-6 border-b border-[#E5E4E2] bg-[#FDFCF8] flex items-center justify-between">
+        <div className="p-5 md:p-6 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="bg-[#b2beb5]/25 text-[#434844] px-2.5 py-1 rounded text-xs font-bold uppercase">
+            <span className="bg-[#EFF6FF] text-[#1E3A8A] px-2.5 py-1 rounded-lg text-xs font-bold uppercase border border-[#BFDBFE]">
               {material.subjectCode}
             </span>
             <div>
-              <h2 className="text-lg md:text-xl font-bold text-[#1b1c1c] leading-tight">
+              <h2 className="text-lg md:text-xl font-bold text-[#0F172A] leading-tight">
                 {material.title}
               </h2>
-              <div className="text-xs text-[#737874] flex items-center gap-2 mt-0.5">
+              <div className="text-xs text-[#64748B] flex items-center gap-2 mt-0.5">
                 <span>{material.fileFormat} • {material.fileSize}</span>
                 <span>•</span>
                 <span>Uploaded by {material.uploadedBy.name} ({material.uploadedDate})</span>
@@ -61,26 +81,27 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setBookmarked(!bookmarked)}
-              className={`p-2 rounded-xl border transition-colors ${
+              onClick={handleBookmarkToggle}
+              className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold ${
                 bookmarked
-                  ? 'bg-[#d6e7a1]/40 border-[#56642b] text-[#56642b]'
-                  : 'border-[#E5E4E2] text-[#737874] hover:bg-[#F0EDED]'
+                  ? 'bg-[#FEF3C7] border-[#FDE68A] text-[#92400E]'
+                  : 'border-[#CBD5E1] text-[#64748B] hover:bg-[#F1F5F9]'
               }`}
-              title="Bookmark Note"
+              title="Save File to My Library"
             >
-              <Bookmark className="w-4 h-4" />
+              <Bookmark className={`w-4 h-4 ${bookmarked ? 'fill-[#D97706]' : ''}`} />
+              <span className="hidden sm:inline">{bookmarked ? 'Saved' : 'Save File'}</span>
             </button>
             <button
               onClick={handleCopyLink}
-              className="p-2 rounded-xl border border-[#E5E4E2] text-[#737874] hover:bg-[#F0EDED] transition-colors"
-              title="Share"
+              className="p-2 rounded-xl border border-[#CBD5E1] text-[#64748B] hover:bg-[#F1F5F9] transition-colors cursor-pointer"
+              title="Share Link"
             >
-              {copied ? <Check className="w-4 h-4 text-[#56642b]" /> : <Share2 className="w-4 h-4" />}
+              {copied ? <Check className="w-4 h-4 text-[#D97706]" /> : <Share2 className="w-4 h-4" />}
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-[#737874] hover:text-[#1b1c1c] hover:bg-[#F0EDED] transition-colors"
+              className="p-2 rounded-xl text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -88,17 +109,17 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
         </div>
 
         {/* Document Content Canvas */}
-        <div className="p-6 md:p-8 overflow-y-auto flex-grow bg-[#FDFCF8] font-sans">
+        <div className="p-6 md:p-8 overflow-y-auto flex-grow bg-white font-sans">
           {material.description && (
-            <div className="bg-[#F6F3F2] p-4 rounded-xl mb-6 border border-[#E5E4E2] text-xs md:text-sm text-[#434844] leading-relaxed">
-              <span className="font-bold text-[#1b1c1c] block mb-1">Overview:</span>
+            <div className="bg-[#F8FAFC] p-4 rounded-2xl mb-6 border border-[#E2E8F0] text-xs md:text-sm text-[#475569] leading-relaxed">
+              <span className="font-bold text-[#0F172A] block mb-1">Overview:</span>
               {material.description}
             </div>
           )}
 
           {/* Rendered Academic Note Snippet */}
-          <div className="prose prose-sm max-w-none text-[#1b1c1c] leading-relaxed space-y-4">
-            <div className="p-6 bg-white rounded-xl border border-[#E5E4E2] shadow-xs font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#2c302e]">
+          <div className="prose prose-sm max-w-none text-[#0F172A] leading-relaxed space-y-4">
+            <div className="p-6 bg-[#F8FAFC] rounded-2xl border border-[#E2E8F0] shadow-xs font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#1E293B]">
               {material.contentSnippet || (
                 `# ${material.title}\n\n` +
                 `Course: ${material.subjectCode} - ${material.subjectName}\n` +
@@ -119,7 +140,7 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
                 {material.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="text-[11px] font-semibold bg-[#F0EDED] text-[#56615a] px-2.5 py-1 rounded-md"
+                    className="text-[11px] font-bold bg-[#EFF6FF] text-[#1E3A8A] px-2.5 py-1 rounded-lg border border-[#BFDBFE]"
                   >
                     #{tag}
                   </span>
@@ -130,28 +151,43 @@ export const DocumentReaderModal: React.FC<DocumentReaderModalProps> = ({
         </div>
 
         {/* Footer actions */}
-        <div className="p-4 md:p-5 border-t border-[#E5E4E2] bg-[#FDFCF8] flex items-center justify-between">
+        <div className="p-4 md:p-5 border-t border-[#E2E8F0] bg-[#F8FAFC] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
               onClick={handleLike}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl border transition-colors ${
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-colors cursor-pointer ${
                 hasLiked
-                  ? 'bg-[#d6e7a1]/40 border-[#56642b] text-[#56642b]'
-                  : 'border-[#E5E4E2] text-[#434844] hover:bg-[#F0EDED]'
+                  ? 'bg-[#FEF3C7] border-[#FDE68A] text-[#92400E]'
+                  : 'border-[#CBD5E1] text-[#334155] hover:bg-[#F1F5F9]'
               }`}
             >
               <ThumbsUp className="w-3.5 h-3.5" />
               <span>{likes} Helpful</span>
             </button>
-            <span className="text-xs text-[#737874]">
+            <span className="text-xs text-[#64748B] font-medium">
               {material.viewsCount} Cohort Views
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              onClick={handleDriveClick}
+              className="px-4 py-2.5 bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[#0F172A] text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-2 cursor-pointer hover:border-[#93C5FD]"
+            >
+              {inDrive ? (
+                <Check className="w-4 h-4 text-[#16A34A]" />
+              ) : (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <path d="M8.5 3L15.5 3L21.5 13.5L14.5 13.5L8.5 3Z" fill="#FFC107" />
+                  <path d="M2.5 13.5L5.5 8.5L14.5 13.5L11.5 18.5L2.5 13.5Z" fill="#2196F3" />
+                  <path d="M11.5 18.5L14.5 13.5L21.5 13.5L18.5 18.5L11.5 18.5Z" fill="#4CAF50" />
+                </svg>
+              )}
+              <span>{inDrive ? 'Added to Drive' : 'Add to Google Drive'}</span>
+            </button>
+            <button
               onClick={() => onDownload(material)}
-              className="px-5 py-2 bg-[#56615a] hover:bg-[#434d46] text-white text-xs font-bold rounded-xl transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-2.5 bg-[#1E3A8A] hover:bg-[#172554] text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-950/15 flex items-center gap-1.5 cursor-pointer hover:scale-[1.02]"
             >
               <Download className="w-3.5 h-3.5" /> Download {material.fileFormat}
             </button>

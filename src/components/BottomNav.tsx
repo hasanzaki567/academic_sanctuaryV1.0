@@ -19,7 +19,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
   ];
 
   return (
-    <nav className="fixed bottom-0 w-full z-40 flex justify-around items-center px-4 py-2 bg-[#FDFCF8]/95 backdrop-blur-md md:hidden rounded-t-2xl border-t border-[#E5E4E2] shadow-[0_-4px_20px_rgba(51,51,51,0.03)]">
+    <nav className="fixed bottom-0 w-full z-40 flex justify-around items-center px-4 py-2 bg-white/95 backdrop-blur-md md:hidden rounded-t-2xl border-t border-[#E2E8F0] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
       {navItems.map((item) => {
         const isActive =
           currentView === item.id ||
@@ -31,8 +31,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
             onClick={() => onNavigate(item.id)}
             className={`flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
               isActive
-                ? 'bg-[#b2beb5] text-[#1b1c1c] font-bold rounded-full px-4 py-1.5 shadow-sm scale-100'
-                : 'text-[#737874] hover:bg-[#F0EDED] px-2 py-1 rounded-xl'
+                ? 'bg-[#1E3A8A] text-white font-bold rounded-full px-4 py-1.5 shadow-sm scale-100'
+                : 'text-[#64748B] hover:bg-[#F1F5F9] px-2 py-1 rounded-xl'
             }`}
           >
             <span
