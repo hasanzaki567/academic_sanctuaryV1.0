@@ -489,26 +489,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Demo accounts for quick-login & testing
-app.get('/api/auth/demo-users', (req, res) => {
-  const sanitized = registeredUsers.map((u) => {
-    const cls = classrooms.find((c) => c.id === u.classroomId);
-    return {
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      avatar: u.avatar,
-      role: u.role,
-      department: u.department,
-      rollNumber: u.rollNumber,
-      classroomId: u.classroomId,
-      classroomName: cls ? cls.name : 'Unknown Cohort',
-      classroomCode: cls ? cls.code : '',
-    };
-  });
-  res.json(sanitized);
-});
-
 // Current user profile & their single specific enrolled classroom
 app.get('/api/auth/me', (req, res) => {
   if (!currentUser) {
@@ -728,18 +708,6 @@ app.post('/api/auth/signup', (req, res) => {
     classroom: assignedClassroom,
     message: `Account created! Enrolled in ${assignedClassroom.name}`,
   });
-});
-
-// Quick switch user account
-app.post('/api/auth/switch-user', (req, res) => {
-  const { userId } = req.body;
-  const user = registeredUsers.find((u) => u.id === userId);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
-  currentUser = user;
-  const userClassroom = classrooms.find((c) => c.id === user.classroomId) || classrooms[0];
-  res.json({ success: true, user, classroom: userClassroom });
 });
 
 // Logout endpoint
