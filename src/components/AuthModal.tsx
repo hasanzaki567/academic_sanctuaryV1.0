@@ -6,7 +6,6 @@ import {
   UserPlus,
   ShieldCheck,
   GraduationCap,
-  Sparkles,
   School,
   Lock,
   Mail,
@@ -41,8 +40,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Demo accounts
-  const [demoUsers, setDemoUsers] = useState<any[]>([]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
@@ -70,15 +67,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setMode(initialMode);
     setErrorMessage(null);
   }, [initialMode, isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetch('/api/auth/demo-users')
-        .then((res) => res.json())
-        .then((data) => setDemoUsers(data))
-        .catch(() => {});
-    }
-  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -177,28 +165,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleQuickLogin = async (user: any) => {
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch('/api/auth/switch-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        confetti({ particleCount: 35, spread: 50 });
-        onAuthSuccess(data.user, data.classroom, `Logged in as ${data.user.name} (${data.user.role})`);
-        onClose();
-      }
-    } catch (err) {
-      setErrorMessage('Failed to switch demo account.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F172A]/50 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white border border-[#E2E8F0] rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
@@ -274,44 +240,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <span>{errorMessage}</span>
             </div>
           )}
-
-          {/* Quick Demo Switcher */}
-          <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-2xl p-3.5">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-[#1E3A8A] uppercase tracking-wider flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-[#D97706]" />
-                Instant Demo Profiles (1-Click Test)
-              </span>
-              <span className="text-[10px] text-[#64748B] font-medium">No password needed</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {demoUsers.slice(0, 4).map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => handleQuickLogin(u)}
-                  disabled={loading}
-                  className="p-2 bg-white hover:bg-[#DBEAFE]/40 border border-[#CBD5E1] rounded-xl text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:border-[#93C5FD]"
-                >
-                  <img
-                    src={u.avatar}
-                    alt={u.name}
-                    className="w-7 h-7 rounded-full object-cover border border-[#CBD5E1] flex-shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="min-w-0 flex-grow">
-                    <div className="text-xs font-bold text-[#0F172A] truncate group-hover:text-[#1E3A8A]">
-                      {u.name}
-                    </div>
-                    <div className="text-[10px] text-[#64748B] truncate">
-                      {u.role === 'super_admin' ? 'Super Admin' : u.role === 'admin' ? 'Admin' : 'Student'} • {u.classroomCode || 'Cohort'}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
 
           {mode === 'login' ? (
             /* Sign In Form */
