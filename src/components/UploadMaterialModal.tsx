@@ -72,59 +72,59 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0F172A]/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
-      <div className="bg-white border border-[#E2E8F0] rounded-3xl max-w-xl w-full p-6 md:p-8 shadow-2xl relative my-8">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+      <div className="bg-[#FEFEFA] border border-[#E5E4E2] rounded-2xl max-w-xl w-full p-6 md:p-8 shadow-2xl relative my-8">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 text-[#64748B] hover:text-[#0F172A] p-2 hover:bg-[#F1F5F9] rounded-full transition-colors cursor-pointer"
+          className="absolute right-4 top-4 text-[#737874] hover:text-[#1b1c1c] p-2 hover:bg-[#F0EDED] rounded-full transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-2xl bg-[#E0E7FF] flex items-center justify-center text-[#1E3A8A] shadow-xs">
+          <div className="w-10 h-10 rounded-full bg-[#b2beb5]/30 flex items-center justify-center text-[#56615a]">
             <Upload className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0F172A]">Upload Study Material</h3>
-            <p className="text-xs text-[#64748B]">Share lecture notes, question papers, or summary slides with your cohort</p>
+            <h3 className="text-xl font-bold text-[#1b1c1c]">Upload Study Material</h3>
+            <p className="text-xs text-[#737874]">Share lecture notes, question papers, or summary slides with your cohort</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Drag and drop file area */}
-          <div className="border-2 border-dashed border-[#CBD5E1] hover:border-[#1E3A8A] rounded-2xl p-6 text-center bg-[#F8FAFC] transition-colors relative cursor-pointer group">
+          <div className="border-2 border-dashed border-[#C3C8C3] hover:border-[#56615a] rounded-xl p-6 text-center bg-[#F9F6EE] transition-colors relative cursor-pointer group">
             <input
               type="file"
               onChange={handleFileChange}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
             <div className="flex flex-col items-center justify-center gap-2">
-              <span className="material-symbols-outlined text-3xl text-[#1E3A8A] group-hover:scale-110 transition-transform">
+              <span className="material-symbols-outlined text-3xl text-[#56615a] group-hover:scale-110 transition-transform">
                 cloud_upload
               </span>
-              <div className="text-xs font-bold text-[#0F172A]">
+              <div className="text-xs font-bold text-[#1b1c1c]">
                 {uploadedFileName ? (
-                  <span className="text-[#D97706] flex items-center gap-1">
+                  <span className="text-[#56642b] flex items-center gap-1">
                     <CheckCircle2 className="w-4 h-4 inline" /> {uploadedFileName}
                   </span>
                 ) : (
                   'Click to browse or drag & drop lecture file here'
                 )}
               </div>
-              <p className="text-[11px] text-[#64748B]">Supports PDF, DOCX, PPTX, TXT up to 25MB</p>
+              <p className="text-[11px] text-[#737874]">Supports PDF, DOCX, PPTX, TXT up to 25MB</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-[#334155] block mb-1">
+              <label className="text-xs font-bold text-[#434844] block mb-1">
                 Subject Course *
               </label>
               <select
                 value={subjectId}
                 onChange={(e) => setSubjectId(e.target.value)}
-                className="paper-input w-full p-2.5 rounded-xl text-xs font-semibold text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+                className="paper-input w-full p-2.5 rounded-lg text-xs font-semibold text-[#1b1c1c]"
                 required
               >
                 {subjects.map((sub) => (
@@ -136,13 +136,13 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#334155] block mb-1">
+              <label className="text-xs font-bold text-[#434844] block mb-1">
                 Category / Type *
               </label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value as MaterialType)}
-                className="paper-input w-full p-2.5 rounded-xl text-xs font-semibold text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+                className="paper-input w-full p-2.5 rounded-lg text-xs font-semibold text-[#1b1c1c]"
               >
                 <option value="notes">Lecture Notes</option>
                 <option value="materials">Reference Materials / Slides</option>
@@ -153,7 +153,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
           </div>
 
           <div>
-            <label className="text-xs font-bold text-[#334155] block mb-1">
+            <label className="text-xs font-bold text-[#434844] block mb-1">
               Document Title *
             </label>
             <input
@@ -162,13 +162,13 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               placeholder="e.g. Trees & Graphs Deep Dive"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="paper-input w-full p-2.5 rounded-xl text-xs font-medium text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+              className="paper-input w-full p-2.5 rounded-lg text-xs font-medium text-[#1b1c1c]"
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-[#334155] block mb-1">
+              <label className="text-xs font-bold text-[#434844] block mb-1">
                 Unit / Module
               </label>
               <input
@@ -176,18 +176,18 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                 placeholder="e.g. Unit 3 & 4"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                className="paper-input w-full p-2.5 rounded-xl text-xs font-medium text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+                className="paper-input w-full p-2.5 rounded-lg text-xs font-medium text-[#1b1c1c]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#334155] block mb-1">
+              <label className="text-xs font-bold text-[#434844] block mb-1">
                 File Format
               </label>
               <select
                 value={fileFormat}
                 onChange={(e) => setFileFormat(e.target.value as FileFormat)}
-                className="paper-input w-full p-2.5 rounded-xl text-xs font-semibold text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+                className="paper-input w-full p-2.5 rounded-lg text-xs font-semibold text-[#1b1c1c]"
               >
                 <option value="PDF">PDF Document</option>
                 <option value="DOCX">Word (.DOCX)</option>
@@ -198,7 +198,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
           </div>
 
           <div>
-            <label className="text-xs font-bold text-[#334155] block mb-1">
+            <label className="text-xs font-bold text-[#434844] block mb-1">
               Description / Study Highlights
             </label>
             <textarea
@@ -206,12 +206,12 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               placeholder="Brief summary of theorems, proofs, or questions contained..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="paper-input w-full p-2.5 rounded-xl text-xs font-medium text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+              className="paper-input w-full p-2.5 rounded-lg text-xs font-medium text-[#1b1c1c]"
             />
           </div>
 
           <div>
-            <label className="text-xs font-bold text-[#334155] block mb-1">
+            <label className="text-xs font-bold text-[#434844] block mb-1">
               Tags (Comma separated)
             </label>
             <input
@@ -219,21 +219,21 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               placeholder="Graphs, AVL Trees, Final Prep"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              className="paper-input w-full p-2.5 rounded-xl text-xs font-medium text-[#0F172A] border border-[#CBD5E1] bg-[#F8FAFC]"
+              className="paper-input w-full p-2.5 rounded-lg text-xs font-medium text-[#1b1c1c]"
             />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3 border-t border-[#E2E8F0]">
+          <div className="pt-4 flex justify-end gap-3 border-t border-[#E5E4E2]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-[#64748B] hover:bg-[#F1F5F9] rounded-xl transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-[#737874] hover:bg-[#F0EDED] rounded-xl transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 bg-[#1E3A8A] hover:bg-[#172554] text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-950/15 flex items-center gap-1.5 cursor-pointer hover:scale-[1.02]"
+              className="px-6 py-2.5 bg-[#56615a] hover:bg-[#434d46] text-white text-xs font-bold rounded-xl transition-colors shadow-sm flex items-center gap-1.5"
             >
               <Upload className="w-3.5 h-3.5" /> Upload to Class Library
             </button>

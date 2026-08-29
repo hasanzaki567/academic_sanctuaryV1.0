@@ -2,44 +2,43 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
-    --surface: 210 20% 98%;
-    --surface-card: 0 0% 100%;
-    --primary: 224 64% 33%;
-    --primary-container: 221 83% 53%;
-    --accent: 38 92% 50%;
-    --border: 214 32% 91%;
-    --outline: 215 16% 47%;
+    --background: 40 30% 98%;
+    --foreground: 0 0% 11%;
+    --surface: 30 20% 98%;
+    --surface-card: 45 40% 99%;
+    --primary: 154 6% 36%;
+    --primary-container: 135 7% 72%;
+    --border: 40 8% 89%;
+    --outline: 135 2% 46%;
   }
 
   body {
     font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: #F8FAFC;
-    color: #0F172A;
+    background-color: #FDFCF8;
+    color: #1b1c1c;
     -webkit-font-smoothing: antialiased;
   }
 }
 
 .academic-shadow {
-  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 20px rgba(51, 51, 51, 0.04);
 }
 
 .academic-shadow-hover {
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 30px rgba(51, 51, 51, 0.08);
 }
 
 .paper-input {
-  background-color: #F1F5F9;
+  background-color: #F9F6EE;
   border: none;
-  border-bottom: 2px solid #CBD5E1;
+  border-bottom: 2px solid #E5E4E2;
   transition: all 0.2s ease;
 }
 
 .paper-input:focus {
   outline: none;
-  border-bottom-color: #1E3A8A;
-  background-color: #FFFFFF;
+  border-bottom-color: #56615a;
+  background-color: #ffffff;
 }
 
 /* Custom scrollbar */
