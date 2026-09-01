@@ -1,6 +1,6 @@
 import React from 'react';
 import { User, Material, Classroom } from '../types';
-import { FileText, Bookmark, Download, Award, ShieldCheck, Mail, School, Users, KeyRound, LogOut, Sparkles } from 'lucide-react';
+import { FileText, Bookmark, Download, Award, ShieldCheck, Mail, School, Users, LogIn, LogOut, Sparkles } from 'lucide-react';
 
 interface ProfileViewProps {
   user: User;
@@ -107,8 +107,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   onClick={() => onOpenAuth('login')}
                   className="px-3.5 py-2 bg-white border border-[#E5E4E2] hover:bg-[#F0EDED] text-[#434844] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-[#56615a]" />
-                  <span>Switch User</span>
+                  <LogIn className="w-3.5 h-3.5 text-[#56615a]" />
+                  <span>Sign In</span>
                 </button>
                 <button
                   onClick={onSignOut}

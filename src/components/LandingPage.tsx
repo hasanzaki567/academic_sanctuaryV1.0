@@ -6,6 +6,8 @@ interface LandingPageProps {
   onOpenJoinClassroom: () => void;
   onEnterDemo: () => void;
   onOpenAuth: (mode?: 'login' | 'signup') => void;
+  currentUser?: any | null;
+  onGoToDashboard: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -13,6 +15,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenJoinClassroom,
   onEnterDemo,
   onOpenAuth,
+  currentUser,
+  onGoToDashboard,
 }) => {
   const benefits = [
     {
@@ -67,20 +71,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           <div className="flex flex-col sm:flex-row justify-center items-center gap-3.5 max-w-lg mx-auto">
             <button
-              onClick={() => onOpenAuth('signup')}
+              onClick={onGoToDashboard}
               className="w-full sm:w-auto bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm md:text-base px-7 py-3.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 group cursor-pointer"
             >
-              <UserPlus className="w-4 h-4" />
-              <span>Create Student Account</span>
+              <span>Go to My Cohort</span>
+              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
             </button>
 
-            <button
-              onClick={() => onOpenAuth('login')}
-              className="w-full sm:w-auto bg-white border border-[#E5E4E2] text-[#1b1c1c] font-semibold text-sm md:text-base px-7 py-3.5 rounded-xl hover:bg-[#F0EDED] transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-            >
-              <LogIn className="w-4 h-4 text-[#56615a]" />
-              <span>Sign In</span>
-            </button>
+            {!currentUser && (
+              <button
+                onClick={() => onOpenAuth('login')}
+                className="w-full sm:w-auto bg-white border border-[#E5E4E2] text-[#1b1c1c] font-semibold text-sm md:text-base px-7 py-3.5 rounded-xl hover:bg-[#F0EDED] transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                <LogIn className="w-4 h-4 text-[#56615a]" />
+                <span>Sign In</span>
+              </button>
+            )}
           </div>
 
           <div className="mt-5 flex items-center justify-center gap-3 text-xs">

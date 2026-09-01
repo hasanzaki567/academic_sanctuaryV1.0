@@ -53,42 +53,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          {currentUser ? (
-            <>
-              <button
-                onClick={() => onNavigate('dashboard')}
-                className="bg-[#56615a] text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-[#434d46] transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
-              >
-                <span>Go to My Cohort</span>
-                <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-              </button>
+          <button
+            onClick={() => onNavigate('dashboard')}
+            className="bg-[#56615a] text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-[#434d46] transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>Go to My Cohort</span>
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </button>
 
-              <button
-                onClick={() => onOpenAuth('login')}
-                className="hidden sm:flex items-center gap-1.5 border border-[#E5E4E2] text-[#434844] px-3.5 py-2 rounded-xl text-xs font-semibold hover:bg-[#F0EDED] transition-colors cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-[#56615a]" />
-                <span>Switch User</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => onOpenAuth('login')}
-                className="text-[#434844] hover:text-[#1b1c1c] px-3.5 py-2 font-semibold text-xs sm:text-sm transition-colors rounded-xl hover:bg-[#F0EDED] flex items-center gap-1.5 cursor-pointer"
-              >
-                <LogIn className="w-4 h-4 text-[#56615a]" />
-                <span>Sign In</span>
-              </button>
-
-              <button
-                onClick={() => onOpenAuth('signup')}
-                className="bg-[#56615a] text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-[#434d46] transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>Sign Up</span>
-              </button>
-            </>
+          {!currentUser && (
+            <button
+              onClick={() => onOpenAuth('login')}
+              className="hidden sm:flex items-center gap-1.5 text-[#434844] hover:text-[#1b1c1c] px-3.5 py-2 font-semibold text-xs sm:text-sm transition-colors rounded-xl hover:bg-[#F0EDED] cursor-pointer"
+            >
+              <LogIn className="w-4 h-4 text-[#56615a]" />
+              <span>Sign In</span>
+            </button>
           )}
         </div>
       </header>
@@ -353,7 +333,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     }}
                     className="w-full text-left px-3 py-2 text-xs font-medium text-[#56615a] hover:bg-[#F0EDED] rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
                   >
-                    <KeyRound className="w-4 h-4 text-[#56615a]" /> Switch / Demo Logins
+                    <LogIn className="w-4 h-4 text-[#56615a]" /> Sign In as Different User
                   </button>
                   <button
                     onClick={() => {

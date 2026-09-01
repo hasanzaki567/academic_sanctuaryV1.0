@@ -263,14 +263,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-[#434844] block uppercase tracking-wide">
-                    Password
-                  </label>
-                  <span className="text-[11px] text-[#737874]">
-                    Default: <code className="bg-[#EAE8E7] px-1 py-0.5 rounded text-[10px]">password123</code>
-                  </span>
-                </div>
+                <label className="text-xs font-bold text-[#434844] block mb-1.5 uppercase tracking-wide">
+                  Password
+                </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-[#737874] absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input

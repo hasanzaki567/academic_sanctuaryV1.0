@@ -24,16 +24,7 @@ export default function App() {
   // Data states
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [activeClassroom, setActiveClassroom] = useState<Classroom | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>({
-    id: 'user-sarah',
-    name: 'Sarah Jenkins',
-    email: 'sarah.j@oxford.edu',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-    role: 'super_admin',
-    department: 'Department of Computer Science',
-    rollNumber: 'CS22B042',
-    classroomId: 'cls-1',
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -332,6 +323,8 @@ export default function App() {
             onOpenJoinClassroom={() => setIsJoinOpen(true)}
             onEnterDemo={() => setCurrentView('dashboard')}
             onOpenAuth={handleOpenAuth}
+            currentUser={currentUser}
+            onGoToDashboard={() => setCurrentView('dashboard')}
           />
         )}
 
