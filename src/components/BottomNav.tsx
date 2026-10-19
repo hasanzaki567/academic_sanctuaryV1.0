@@ -13,8 +13,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
   const navItems = [
     { id: 'dashboard', label: 'Home', icon: 'home' },
     { id: 'subjects', label: 'Subjects', icon: 'book' },
+    { id: 'chat', label: 'Chat', icon: 'chat' },
     { id: 'notes', label: 'Notes', icon: 'description' },
-    { id: 'exams', label: 'Exams', icon: 'quiz' },
     { id: 'profile', label: 'Profile', icon: 'person' },
   ];
 

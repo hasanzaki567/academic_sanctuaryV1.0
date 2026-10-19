@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Classroom, User, Subject, Material, Announcement, Exam, Member } from './types';
+import { Classroom, User, Subject, Material, Announcement, Exam, Member, UserRole } from './types';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { LandingPage } from './components/LandingPage';
@@ -15,11 +15,25 @@ import { UploadMaterialModal } from './components/UploadMaterialModal';
 import { DocumentReaderModal } from './components/DocumentReaderModal';
 import { JoinClassroomModal } from './components/JoinClassroomModal';
 import { AuthModal } from './components/AuthModal';
+import { ChatView } from './components/chat/ChatView';
+import { supabase } from './lib/supabase';
+import { MessageSquare, UserCheck, School } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function App() {
-  // App navigation state: 'landing' | 'dashboard' | 'subject-detail' | 'create-classroom' | 'subjects' | 'notes' | 'exams' | 'members' | 'profile'
+  // App navigation state: 'landing' | 'dashboard' | 'subject-detail' | 'create-classroom' | 'subjects' | 'notes' | 'exams' | 'members' | 'profile' | 'chat'
   const [currentView, setCurrentView] = useState<string>('landing');
+  const [initialChatTargetUserId, setInitialChatTargetUserId] = useState<string | null>(null);
+  const [materialToForward, setMaterialToForward] = useState<Material | null>(null);
+
+  // Universal Navigation History Stack to enable Back Button across all views and features
+  const [navHistory, setNavHistory] = useState<Array<{ view: string; subject?: Subject | null }>>([]);
+
+  const handleForwardMaterialFromNotes = (material: Material) => {
+    setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
+    setMaterialToForward(material);
+    setCurrentView('chat');
+  };
   
   // Data states
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -34,11 +48,12 @@ export default function App() {
 
   // Auth Modal state
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup'>('login');
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup' | 'forgot-password' | 'reset-password'>('login');
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadSubjectId, setUploadSubjectId] = useState<string | undefined>(undefined);
+  const [uploadExamType, setUploadExamType] = useState<string | undefined>(undefined);
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -48,6 +63,30 @@ export default function App() {
     setTimeout(() => {
       setToastMessage(null);
     }, 3500);
+  };
+
+  const handleOpenUpload = (targetSubjectOrExamId?: string, targetExamType?: string) => {
+    let resolvedSubjectId = targetSubjectOrExamId;
+    let resolvedExamType = targetExamType;
+
+    if (targetSubjectOrExamId && targetSubjectOrExamId.startsWith('exam-')) {
+      const foundExam = exams.find((e) => e.id === targetSubjectOrExamId);
+      if (foundExam) {
+        resolvedExamType = targetExamType || foundExam.examType;
+        const matchingSubject = subjects.find(
+          (s) =>
+            s.code.toLowerCase() === foundExam.subjectCode.toLowerCase() ||
+            s.name.toLowerCase() === foundExam.subjectName.toLowerCase()
+        );
+        if (matchingSubject) {
+          resolvedSubjectId = matchingSubject.id;
+        }
+      }
+    }
+
+    setUploadSubjectId(resolvedSubjectId);
+    setUploadExamType(resolvedExamType);
+    setIsUploadOpen(true);
   };
 
   // Helper to load all resources for a specific classroom
@@ -88,50 +127,150 @@ export default function App() {
     }
   };
 
-  // Fetch initial data from Express backend
-  useEffect(() => {
-    const fetchData = async () => {
+  // Helper to load Supabase User and match their classroom
+  const loadSupabaseUser = async (sbUser: any, currentClassrooms: Classroom[]) => {
+    try {
+      let profile: any = null;
       try {
-        const [clsRes, authMeRes] = await Promise.all([
-          fetch('/api/classrooms'),
-          fetch('/api/auth/me'),
-        ]);
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sbUser.id)
+          .maybeSingle();
+        if (!error && data) {
+          profile = data;
+        }
+      } catch (e) {
+        console.warn('Could not query profiles table:', e);
+      }
 
-        let initialClassroom: Classroom | null = null;
+      const resolvedName =
+        profile?.full_name ||
+        sbUser.user_metadata?.full_name ||
+        sbUser.email?.split('@')[0] ||
+        'Student';
 
+      const resolvedClassCode =
+        profile?.class_code ||
+        sbUser.user_metadata?.class_code ||
+        '';
+
+      const resolvedRegNo =
+        profile?.registration_number ||
+        sbUser.user_metadata?.registration_number ||
+        '';
+
+      let matchedCls = currentClassrooms.find(
+        (c) => c.code.toLowerCase() === resolvedClassCode.toLowerCase()
+      );
+
+      if (!matchedCls && resolvedClassCode) {
+        matchedCls = {
+          id: `cls-${resolvedClassCode.toLowerCase().replace(/[^a-z0-9]/g, '') || 'general'}`,
+          code: resolvedClassCode.toUpperCase(),
+          name: `Classroom Cohort ${resolvedClassCode.toUpperCase()}`,
+          collegeName: 'Academic Sanctuary',
+          location: 'Main Campus',
+          department: 'Engineering & Sciences',
+          course: 'Academic Cohort',
+          degreeLevel: 'undergraduate',
+          batchYear: '2026',
+          section: 'A',
+          semester: 'Semester 1',
+          superAdminId: sbUser.id,
+          memberCount: 1,
+          createdAt: new Date().toISOString(),
+        };
+        setClassrooms((prev) => [matchedCls!, ...prev.filter((c) => c.id !== matchedCls!.id)]);
+      }
+
+      const appUser: User = {
+        id: sbUser.id,
+        name: resolvedName,
+        email: sbUser.email || '',
+        avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(sbUser.id)}`,
+        role: 'student',
+        department: 'Academic Sanctuary',
+        rollNumber: resolvedRegNo,
+        classCode: resolvedClassCode,
+        registrationNumber: resolvedRegNo,
+        classroomId: matchedCls?.id,
+      };
+
+      setCurrentUser(appUser);
+      if (matchedCls) {
+        setActiveClassroom(matchedCls);
+        loadClassroomData(matchedCls.id);
+      }
+    } catch (err) {
+      console.error('Error loading Supabase user profile:', err);
+    }
+  };
+
+  // Fetch initial data and restore Supabase authentication session
+  useEffect(() => {
+    let loadedClassrooms: Classroom[] = [];
+
+    const initializeApp = async () => {
+      try {
+        const clsRes = await fetch('/api/classrooms');
         if (clsRes.ok) {
-          const clsData = await clsRes.json();
-          setClassrooms(clsData);
-          if (clsData.length > 0) {
-            initialClassroom = clsData[0];
-            setActiveClassroom(clsData[0]);
+          loadedClassrooms = await clsRes.json();
+          setClassrooms(loadedClassrooms);
+          if (loadedClassrooms.length > 0) {
+            setActiveClassroom(loadedClassrooms[0]);
+            loadClassroomData(loadedClassrooms[0].id);
           }
-        }
-
-        if (authMeRes.ok) {
-          const authData = await authMeRes.json();
-          if (authData.user) {
-            setCurrentUser(authData.user);
-          }
-          if (authData.classroom) {
-            initialClassroom = authData.classroom;
-            setActiveClassroom(authData.classroom);
-          }
-        }
-
-        if (initialClassroom) {
-          loadClassroomData(initialClassroom.id);
         }
       } catch (err) {
-        console.error('Failed to load initial data from server:', err);
+        console.error('Failed to load initial classrooms from server:', err);
+      }
+
+      // Check URL for recovery link (password reset from email)
+      if (window.location.hash.includes('type=recovery') || window.location.hash.includes('reset-password')) {
+        setAuthInitialMode('reset-password');
+        setIsAuthOpen(true);
+      }
+
+      // Restore active Supabase session
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await loadSupabaseUser(session.user, loadedClassrooms);
+        }
+      } catch (err) {
+        console.error('Error restoring Supabase session:', err);
       }
     };
 
-    fetchData();
+    initializeApp();
+
+    // Listen for Supabase auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthInitialMode('reset-password');
+        setIsAuthOpen(true);
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        await loadSupabaseUser(session.user, loadedClassrooms);
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Handlers
   const handleNavigate = (view: string, data?: any) => {
+    if (view === currentView && (!data || data?.id === selectedSubject?.id)) return;
+    if ((view === 'chat' || view === 'profile') && !currentUser) {
+      showToast('Please sign in with your email and password to access ' + (view === 'chat' ? 'cohort chat.' : 'your profile.'));
+      handleOpenAuth('login');
+      return;
+    }
+    setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
     if (view === 'subject-detail' && data) {
       setSelectedSubject(data);
     }
@@ -139,7 +278,29 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {
+  const handleGoBack = () => {
+    if (navHistory.length > 0) {
+      const nextHist = [...navHistory];
+      const prevEntry = nextHist.pop()!;
+      setNavHistory(nextHist);
+      if (prevEntry.subject) {
+        setSelectedSubject(prevEntry.subject);
+      }
+      setCurrentView(prevEntry.view);
+    } else {
+      // Fallback hierarchy if stack is empty
+      if (currentView === 'subject-detail') {
+        setCurrentView('notes');
+      } else if (currentView !== 'dashboard' && currentView !== 'landing') {
+        setCurrentView('dashboard');
+      } else if (currentView === 'dashboard') {
+        setCurrentView('landing');
+      }
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenAuth = (mode: 'login' | 'signup' | 'forgot-password' | 'reset-password' = 'login') => {
     setAuthInitialMode(mode);
     setIsAuthOpen(true);
   };
@@ -155,17 +316,33 @@ export default function App() {
     setCurrentView('dashboard');
   };
 
-  const handleSignOut = async () => {
+  const handleQuickDemoLogin = async (email: string) => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch {}
-    showToast('Signed out. Returned to sanctuary landing.');
-    setCurrentView('landing');
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        confetti({ particleCount: 50, spread: 60 });
+        handleAuthSuccess(data.user, data.classroom, data.message || `Welcome back, ${data.user.name}!`);
+      } else {
+        showToast(data.error || 'Failed to authenticate demo account.');
+      }
+    } catch {
+      showToast('Error connecting to demo authentication server.');
+    }
   };
 
-  const handleOpenUpload = (subjectId?: string) => {
-    setUploadSubjectId(subjectId);
-    setIsUploadOpen(true);
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setCurrentUser(null);
+    showToast('Signed out successfully. Returned to sanctuary landing.');
+    setCurrentView('landing');
   };
 
   const handleCreateClassroom = async (formData: any) => {
@@ -226,7 +403,7 @@ export default function App() {
       });
       if (res.ok) {
         const newMat = await res.json();
-        setMaterials([newMat, ...materials]);
+        setMaterials([...materials, newMat]);
         showToast(`"${newMat.title}" uploaded to library.`);
       }
     } catch (err) {
@@ -262,9 +439,129 @@ export default function App() {
         const newExam = await res.json();
         setExams([...exams, newExam]);
         showToast(`Exam schedule added for ${newExam.subjectName}.`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Only administrators can schedule exams.');
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleAddMember = async (memberData: {
+    email: string;
+    name: string;
+    rollNumber: string;
+    role: 'student' | 'admin';
+    department?: string;
+  }) => {
+    if (!activeClassroom) return;
+    try {
+      const res = await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...memberData,
+          classroomId: activeClassroom.id,
+        }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to enroll member.');
+      }
+      const newMember = await res.json();
+      setMembers((prev) => {
+        const exists = prev.some((m) => m.id === newMember.id);
+        if (exists) return prev;
+        return [...prev, newMember];
+      });
+      showToast(`${newMember.name} enrolled via institutional mail (${newMember.email}).`);
+      confetti({ particleCount: 35, spread: 55 });
+    } catch (err: any) {
+      showToast(err.message || 'Error adding member.');
+      throw err;
+    }
+  };
+
+  const handleUpdateMemberRole = async (memberId: string, newRole: UserRole) => {
+    try {
+      const res = await fetch(`/api/members/${memberId}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to update role.');
+      }
+      const updated = await res.json();
+      setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, role: updated.role } : m)));
+      if (currentUser && currentUser.id === memberId) {
+        setCurrentUser((prev) => (prev ? { ...prev, role: updated.role } : null));
+      }
+      showToast(
+        newRole === 'admin'
+          ? `Granted Administrator access to ${updated.name}.`
+          : `Administrator access removed for ${updated.name}.`
+      );
+    } catch (err: any) {
+      showToast(err.message || 'Error updating member role.');
+      throw err;
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    try {
+      const res = await fetch(`/api/members/${memberId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to remove member.');
+      }
+      const target = members.find((m) => m.id === memberId);
+      setMembers((prev) => prev.filter((m) => m.id !== memberId));
+      showToast(`Removed ${target?.name || 'member'} from cohort.`);
+    } catch (err: any) {
+      showToast(err.message || 'Error removing member.');
+      throw err;
+    }
+  };
+
+  const handleBanMember = async (memberId: string, memberName?: string) => {
+    try {
+      const res = await fetch(`/api/members/${memberId}/ban`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to ban member.');
+      }
+      setMembers((prev) => prev.filter((m) => m.id !== memberId));
+      showToast(`Permanently banned ${memberName || 'member'} from cohort.`);
+    } catch (err: any) {
+      showToast(err.message || 'Error banning member.');
+      throw err;
+    }
+  };
+
+  const handleToggleExamComplete = async (examId: string, currentCompleted?: boolean) => {
+    const newStatus = !currentCompleted;
+    try {
+      const res = await fetch(`/api/exams/${examId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isCompleted: newStatus }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setExams((prev) => prev.map((e) => (e.id === examId ? updated : e)));
+        showToast(newStatus ? 'Exam marked as completed! Great milestone!' : 'Exam moved back to upcoming timetable.');
+      }
+    } catch {
+      setExams((prev) =>
+        prev.map((e) => (e.id === examId ? { ...e, isCompleted: newStatus } : e))
+      );
     }
   };
 
@@ -284,7 +581,11 @@ export default function App() {
     showToast(`Downloading "${material.title}" (${material.fileSize})...`);
   };
 
-  const nextExam = exams.length > 0 ? exams[0] : null;
+  const nextExam =
+    exams
+      .filter((e) => !e.isCompleted && (e.daysRemaining === undefined || e.daysRemaining >= 0))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))[0] ||
+    (exams.length > 0 ? exams[0] : null);
 
   return (
     <div className="min-h-screen bg-[#FDFCF8] text-[#1b1c1c] flex flex-col font-body-md antialiased selection:bg-[#d9e6dc] selection:text-[#1b1c1c]">
@@ -304,7 +605,9 @@ export default function App() {
         announcements={announcements}
         classrooms={classrooms}
         onNavigate={handleNavigate}
-        onOpenCreateClassroom={() => setCurrentView('create-classroom')}
+        onBack={handleGoBack}
+        canGoBack={navHistory.length > 0 || currentView !== 'landing'}
+        onOpenCreateClassroom={() => handleNavigate('create-classroom')}
         onOpenJoinClassroom={() => setIsJoinOpen(true)}
         onSelectClassroom={(cls) => {
           setActiveClassroom(cls);
@@ -316,38 +619,63 @@ export default function App() {
       />
 
       {/* Main Views */}
-      <div className={currentView === 'landing' ? '' : 'pt-[68px]'}>
+      <div className={currentView === 'landing' ? 'w-full' : 'pt-[68px] w-full min-h-screen'}>
         {currentView === 'landing' && (
           <LandingPage
-            onOpenCreateClassroom={() => setCurrentView('create-classroom')}
+            onOpenCreateClassroom={() => handleNavigate('create-classroom')}
             onOpenJoinClassroom={() => setIsJoinOpen(true)}
-            onEnterDemo={() => setCurrentView('dashboard')}
             onOpenAuth={handleOpenAuth}
-            currentUser={currentUser}
-            onGoToDashboard={() => setCurrentView('dashboard')}
+            onQuickDemoLogin={handleQuickDemoLogin}
           />
         )}
 
-        {currentView === 'dashboard' && activeClassroom && (
-          <DashboardView
-            classroom={activeClassroom}
-            user={currentUser || {
-              id: 'guest',
-              name: 'Student',
-              email: 'student@sanctuary.edu',
-              avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-              role: 'student',
-              department: 'General Studies',
-              rollNumber: 'STU001'
-            }}
-            announcements={announcements}
-            nextExam={nextExam}
-            recentMaterials={materials.slice(0, 6)}
-            onNavigate={handleNavigate}
-            onOpenUpload={() => handleOpenUpload()}
-            onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
-            onAddAnnouncement={handleAddAnnouncement}
-          />
+        {currentView === 'dashboard' && (
+          activeClassroom ? (
+            <DashboardView
+              classroom={activeClassroom}
+              user={currentUser || {
+                id: 'guest',
+                name: 'Student',
+                email: 'student@institution.edu',
+                avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
+                role: 'student',
+                department: 'General Studies',
+                rollNumber: 'STU001'
+              }}
+              announcements={announcements}
+              nextExam={nextExam}
+              recentMaterials={materials.slice(0, 8)}
+              onNavigate={handleNavigate}
+              onBack={handleGoBack}
+              onOpenUpload={() => handleOpenUpload()}
+              onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
+              onAddAnnouncement={handleAddAnnouncement}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <School className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">No Classroom Connected</h2>
+              <p className="text-sm text-[#56615a]">
+                You are not currently enrolled in any classroom cohort. Join an existing cohort with an access code or create a new classroom for your batch.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 pt-2 w-full justify-center">
+                <button
+                  onClick={() => setIsJoinOpen(true)}
+                  className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+                >
+                  Join Classroom
+                </button>
+                <button
+                  onClick={() => handleNavigate('create-classroom')}
+                  className="px-6 py-3 bg-white border border-[#E5E4E2] text-[#1b1c1c] font-bold text-sm rounded-xl hover:bg-[#F0EDED] transition-all cursor-pointer"
+                >
+                  Create Classroom
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {currentView === 'subject-detail' && selectedSubject && (
@@ -357,13 +685,15 @@ export default function App() {
             onOpenUpload={(subId) => handleOpenUpload(subId)}
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
+            onForwardMaterial={handleForwardMaterialFromNotes}
+            onBack={handleGoBack}
           />
         )}
 
         {currentView === 'create-classroom' && (
           <CreateClassroomWizard
             onCreate={handleCreateClassroom}
-            onCancel={() => setCurrentView('landing')}
+            onCancel={handleGoBack}
           />
         )}
 
@@ -371,24 +701,24 @@ export default function App() {
           <SubjectsListView
             subjects={subjects}
             onSelectSubject={(subject) => {
-              setSelectedSubject(subject);
-              setCurrentView('subject-detail');
+              handleNavigate('subject-detail', subject);
             }}
-            onOpenAddSubject={() => {
-              const name = prompt('Enter new subject name (e.g. Cloud Computing):');
-              if (name) {
-                const code = prompt('Enter course code (e.g. CS307):') || 'CS307';
-                fetch('/api/subjects', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name, code, professor: 'Dr. Guest Faculty', description: `Curriculum and notes for ${name}` }),
+            onBack={handleGoBack}
+            onAddSubject={(subjectData) => {
+              fetch('/api/subjects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subjectData),
+              })
+                .then((res) => res.json())
+                .then((newSub) => {
+                  setSubjects((prev) => [...prev, newSub]);
+                  showToast(`Course "${newSub.name}" added successfully.`);
                 })
-                  .then((res) => res.json())
-                  .then((newSub) => {
-                    setSubjects([...subjects, newSub]);
-                    showToast(`Subject "${newSub.name}" added.`);
-                  });
-              }
+                .catch((err) => {
+                  console.error('Error adding subject:', err);
+                  showToast('Failed to add subject.');
+                });
             }}
           />
         )}
@@ -400,20 +730,28 @@ export default function App() {
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
             onOpenUpload={() => handleOpenUpload()}
+            onForwardMaterial={handleForwardMaterialFromNotes}
+            onBack={handleGoBack}
           />
         )}
 
         {currentView === 'exams' && (
           <ExamsScheduleView
             exams={exams}
+            materials={materials}
+            currentUserRole={currentUser?.role || 'student'}
             onAddExam={handleAddExam}
+            onToggleComplete={handleToggleExamComplete}
+            onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
+            onDownloadMaterial={handleDownloadMaterial}
+            onOpenUpload={(examId, examType) => handleOpenUpload(examId, examType)}
+            onBack={handleGoBack}
             onNavigateToSubject={(code) => {
               const found = subjects.find((s) => s.code.toLowerCase() === code.toLowerCase());
               if (found) {
-                setSelectedSubject(found);
-                setCurrentView('subject-detail');
+                handleNavigate('subject-detail', found);
               } else {
-                setCurrentView('notes');
+                handleNavigate('notes');
               }
             }}
           />
@@ -424,18 +762,102 @@ export default function App() {
             members={members}
             classroom={activeClassroom}
             currentUserRole={currentUser?.role || 'student'}
+            currentUserId={currentUser?.id}
+            onAddMember={handleAddMember}
+            onUpdateRole={handleUpdateMemberRole}
+            onRemoveMember={handleRemoveMember}
+            onBanMember={handleBanMember}
+            onBack={handleGoBack}
+            onStartChat={(memberId) => {
+              setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
+              setInitialChatTargetUserId(memberId);
+              setCurrentView('chat');
+            }}
           />
         )}
 
-        {currentView === 'profile' && currentUser && (
-          <ProfileView
-            user={currentUser}
-            classroom={activeClassroom}
-            materials={materials}
-            onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
-            onOpenAuth={handleOpenAuth}
-            onSignOut={handleSignOut}
-          />
+        {currentView === 'chat' && activeClassroom && (
+          currentUser ? (
+            <ChatView
+              currentUser={currentUser}
+              activeClassroomId={activeClassroom.id}
+              classMembers={members}
+              materials={materials}
+              onOpenDocumentReader={(mat) => setPreviewMaterial(mat)}
+              initialTargetUserId={initialChatTargetUserId}
+              onClearInitialTarget={() => setInitialChatTargetUserId(null)}
+              materialToForward={materialToForward}
+              onClearMaterialToForward={() => setMaterialToForward(null)}
+              onRemoveCohortMember={handleRemoveMember}
+              onBanCohortMember={handleBanMember}
+              onBack={handleGoBack}
+              onUpdateCurrentUser={(updated) => {
+                setCurrentUser((prev) => (prev ? { ...prev, ...updated } : null));
+                setMembers((prev) =>
+                  prev.map((m) =>
+                    m.id === currentUser?.id
+                      ? {
+                          ...m,
+                          name: updated.name || m.name,
+                          avatar: updated.avatar || m.avatar,
+                        }
+                      : m
+                  )
+                );
+              }}
+              onUpdateFriendName={(friendId, newName) => {
+                setMembers((prev) =>
+                  prev.map((m) => (m.id === friendId ? { ...m, name: newName } : m))
+                );
+              }}
+            />
+          ) : (
+            <div className="max-w-md mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <MessageSquare className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">Sign In Required</h2>
+              <p className="text-sm text-[#56615a]">
+                Please sign in with your institutional email and credentials to participate in your cohort chat.
+              </p>
+              <button
+                onClick={() => handleOpenAuth('login')}
+                className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+              >
+                Sign In with Institutional ID
+              </button>
+            </div>
+          )
+        )}
+
+        {currentView === 'profile' && (
+          currentUser ? (
+            <ProfileView
+              user={currentUser}
+              classroom={activeClassroom}
+              materials={materials}
+              onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
+              onOpenAuth={handleOpenAuth}
+              onSignOut={handleSignOut}
+              onBack={handleGoBack}
+            />
+          ) : (
+            <div className="max-w-md mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <UserCheck className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">Member Profile</h2>
+              <p className="text-sm text-[#56615a]">
+                Sign in to your account to view your uploaded notes, enrolled cohort stats, and academic contributions.
+              </p>
+              <button
+                onClick={() => handleOpenAuth('login')}
+                className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+              >
+                Sign In to Your Account
+              </button>
+            </div>
+          )
         )}
       </div>
 
@@ -462,8 +884,14 @@ export default function App() {
       <UploadMaterialModal
         isOpen={isUploadOpen}
         subjects={subjects}
+        exams={exams}
         defaultSubjectId={uploadSubjectId}
-        onClose={() => setIsUploadOpen(false)}
+        defaultExamType={uploadExamType}
+        onClose={() => {
+          setIsUploadOpen(false);
+          setUploadSubjectId(undefined);
+          setUploadExamType(undefined);
+        }}
         onUpload={handleUploadMaterial}
       />
 

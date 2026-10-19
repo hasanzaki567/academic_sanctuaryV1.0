@@ -1,23 +1,43 @@
-import React from 'react';
-import { Plus, LogIn, ArrowRight, Sparkles, UserPlus, School, KeyRound, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, LogIn, ArrowRight, Sparkles, UserPlus, School, KeyRound, ShieldCheck, FileText, Lock, BookOpen } from 'lucide-react';
+import { LegalModal, LegalDocType } from './LegalModal';
 
 interface LandingPageProps {
   onOpenCreateClassroom: () => void;
   onOpenJoinClassroom: () => void;
-  onEnterDemo: () => void;
   onOpenAuth: (mode?: 'login' | 'signup') => void;
-  currentUser?: any | null;
-  onGoToDashboard: () => void;
+  onQuickDemoLogin?: (email: string) => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenCreateClassroom,
   onOpenJoinClassroom,
-  onEnterDemo,
   onOpenAuth,
-  currentUser,
-  onGoToDashboard,
+  onQuickDemoLogin,
 }) => {
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
+  const [legalTab, setLegalTab] = useState<LegalDocType>('terms');
+
+  const openLegal = (tab: LegalDocType) => {
+    setLegalTab(tab);
+    setLegalModalOpen(true);
+  };
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash === '#terms' || hash === '#terms-of-service') {
+        openLegal('terms');
+      } else if (hash === '#privacy' || hash === '#privacy-policy') {
+        openLegal('privacy');
+      } else if (hash === '#honor' || hash === '#honor-code') {
+        openLegal('honor');
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
   const benefits = [
     {
       icon: 'groups',
@@ -71,39 +91,62 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           <div className="flex flex-col sm:flex-row justify-center items-center gap-3.5 max-w-lg mx-auto">
             <button
-              onClick={onGoToDashboard}
+              onClick={() => onOpenAuth('signup')}
               className="w-full sm:w-auto bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm md:text-base px-7 py-3.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 group cursor-pointer"
             >
-              <span>Go to My Cohort</span>
-              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+              <UserPlus className="w-4 h-4" />
+              <span>Create Student Account</span>
             </button>
 
-            {!currentUser && (
-              <button
-                onClick={() => onOpenAuth('login')}
-                className="w-full sm:w-auto bg-white border border-[#E5E4E2] text-[#1b1c1c] font-semibold text-sm md:text-base px-7 py-3.5 rounded-xl hover:bg-[#F0EDED] transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              >
-                <LogIn className="w-4 h-4 text-[#56615a]" />
-                <span>Sign In</span>
-              </button>
-            )}
-          </div>
-
-          <div className="mt-5 flex items-center justify-center gap-3 text-xs">
-            <button
-              onClick={onEnterDemo}
-              className="text-[#56615a] underline hover:text-[#1b1c1c] font-semibold cursor-pointer"
-            >
-              Explore Oxford CSE 2026 Batch →
-            </button>
-            <span className="text-[#C3C8C3]">•</span>
             <button
               onClick={() => onOpenAuth('login')}
-              className="text-[#737874] hover:text-[#1b1c1c] flex items-center gap-1 cursor-pointer"
+              className="w-full sm:w-auto bg-white border border-[#E5E4E2] text-[#1b1c1c] font-semibold text-sm md:text-base px-7 py-3.5 rounded-xl hover:bg-[#F0EDED] transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
             >
-              <KeyRound className="w-3 h-3 text-[#56642b]" />
-              <span>1-Click Test Profiles</span>
+              <LogIn className="w-4 h-4 text-[#56615a]" />
+              <span>Sign In</span>
             </button>
+          </div>
+
+          {/* Quick Demo Access Bar */}
+          <div className="mt-8 pt-6 border-t border-[#E5E4E2]/70 max-w-xl mx-auto flex flex-col items-center gap-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#56615a] uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-[#56615a]" />
+              <span>Quick Demo Access (1-Click Login)</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => onQuickDemoLogin ? onQuickDemoLogin('sarah.j@oxford.edu') : onOpenAuth('login')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span>Sarah (Super Admin - Oxford)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuickDemoLogin ? onQuickDemoLogin('michael.k@oxford.edu') : onOpenAuth('login')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Michael (Admin)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuickDemoLogin ? onQuickDemoLogin('elena.r@oxford.edu') : onOpenAuth('login')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                <span>Elena (Student)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuickDemoLogin ? onQuickDemoLogin('alex.t@stanford.edu') : onOpenAuth('login')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <span>Alex (Stanford)</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -150,15 +193,56 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
       {/* Footer */}
       <footer className="w-full px-4 md:px-16 py-8 border-t border-[#E5E4E2] flex flex-col md:flex-row justify-between items-center gap-4 mt-auto bg-[#FDFCF8]">
-        <div className="text-xs text-[#737874]">
-          © 2024 Academic Sanctuary. All rights reserved.
+        <div className="flex flex-col sm:flex-row items-center gap-1.5 sm:gap-2 text-xs text-[#737874] text-center sm:text-left">
+          <span>© 2026 Academic Sanctuary. All rights reserved.</span>
+          <span className="hidden sm:inline text-[#C3C8C3]">•</span>
+          <span className="text-[#8e948f]">Digital Library & Cohort Workspace</span>
         </div>
-        <div className="flex items-center gap-4 text-xs text-[#56615a]">
-          <span>Privacy Policy</span>
-          <span>Terms of Service</span>
-          <span>Help Center</span>
+        <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-[#56615a]">
+          <a
+            id="footer-terms-link"
+            href="#terms"
+            onClick={(e) => {
+              e.preventDefault();
+              openLegal('terms');
+            }}
+            className="hover:text-[#1b1c1c] font-medium underline-offset-4 hover:underline transition-colors cursor-pointer py-1"
+          >
+            Terms of Service
+          </a>
+          <span className="text-[#C3C8C3]">•</span>
+          <a
+            id="footer-privacy-link"
+            href="#privacy"
+            onClick={(e) => {
+              e.preventDefault();
+              openLegal('privacy');
+            }}
+            className="hover:text-[#1b1c1c] font-medium underline-offset-4 hover:underline transition-colors cursor-pointer py-1"
+          >
+            Privacy Policy
+          </a>
+          <span className="text-[#C3C8C3]">•</span>
+          <a
+            id="footer-honor-code-link"
+            href="#honor"
+            onClick={(e) => {
+              e.preventDefault();
+              openLegal('honor');
+            }}
+            className="hover:text-[#1b1c1c] font-medium underline-offset-4 hover:underline transition-colors cursor-pointer py-1"
+          >
+            Honor Code
+          </a>
         </div>
       </footer>
+
+      {/* Legal & Policy Viewer Modal */}
+      <LegalModal
+        isOpen={legalModalOpen}
+        onClose={() => setLegalModalOpen(false)}
+        initialTab={legalTab}
+      />
     </div>
   );
 };

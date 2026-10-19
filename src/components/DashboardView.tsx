@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Classroom, User, Announcement, Exam, Material } from '../types';
-import { Sparkles, Plus, Clock, FileText, ArrowRight, Share2, Eye, Download, Bookmark } from 'lucide-react';
+import { Sparkles, Plus, Clock, FileText, ArrowRight, ArrowLeft, Share2, Eye, Download, Bookmark } from 'lucide-react';
 
 interface DashboardViewProps {
   classroom: Classroom;
@@ -9,6 +9,7 @@ interface DashboardViewProps {
   nextExam: Exam | null;
   recentMaterials: Material[];
   onNavigate: (view: string, data?: any) => void;
+  onBack?: () => void;
   onOpenUpload: () => void;
   onPreviewMaterial: (material: Material) => void;
   onAddAnnouncement: (title: string, description: string) => void;
@@ -21,6 +22,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   nextExam,
   recentMaterials,
   onNavigate,
+  onBack,
   onOpenUpload,
   onPreviewMaterial,
   onAddAnnouncement,
@@ -52,12 +54,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   return (
-    <main className="w-full max-w-[1280px] px-4 md:px-16 py-6 md:py-10 flex flex-col gap-8 mx-auto min-h-screen">
+    <main className="w-full px-4 sm:px-6 md:px-8 lg:px-10 py-6 md:py-8 flex flex-col gap-6 min-h-screen">
+      {/* Back button */}
+      {onBack && (
+        <div className="self-start">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#F0EDED] hover:bg-[#E4E2E1] text-[#434844] hover:text-[#1b1c1c] text-xs font-bold transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Previous Screen</span>
+          </button>
+        </div>
+      )}
+
       {/* Welcome Header */}
-      <section className="flex flex-col gap-1 pt-2">
+      <section className="flex flex-col gap-1 pt-1">
         <div className="flex items-center justify-between">
           <p className="text-xs md:text-sm font-semibold text-[#737874] tracking-wider uppercase">
-            {classroom ? classroom.name : 'B.TECH CSE 2026 - SECTION A'}
+            {classroom ? classroom.name : 'Classroom Cohort'}
           </p>
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 bg-[#F0EDED] text-[#56615a] rounded-full text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-[#56642b] animate-pulse" />
@@ -65,7 +80,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </span>
         </div>
         <h2 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-[#1b1c1c] tracking-tight">
-          Welcome back, {user ? user.name.split(' ')[0] : 'Sarah'}
+          Welcome back, {user ? user.name.split(' ')[0] : 'Student'}
         </h2>
       </section>
 
@@ -91,28 +106,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          <ul className="flex flex-col divide-y divide-[#E4E2E1]">
-            {announcements.slice(0, 3).map((item) => (
-              <li key={item.id} className="py-3.5 first:pt-1 last:pb-1 flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#737874]">{item.timestamp}</span>
-                  {item.isUrgent && (
-                    <span className="text-[10px] uppercase font-bold text-[#ba1a1a] bg-[#ffdad6] px-2 py-0.5 rounded-full">
-                      Important
-                    </span>
-                  )}
-                </div>
-                <p className="text-base md:text-lg font-semibold text-[#1b1c1c] leading-snug">
-                  {item.title}
-                </p>
-                {item.description && (
-                  <p className="text-xs md:text-sm text-[#434844] mt-0.5 line-clamp-2">
-                    {item.description}
+          {announcements.length === 0 ? (
+            <div className="py-8 px-4 border border-dashed border-[#E5E4E2] rounded-xl flex flex-col items-center justify-center text-center bg-[#FAF9F7]">
+              <p className="text-sm font-semibold text-[#1b1c1c]">No announcements posted yet</p>
+              <p className="text-xs text-[#737874] mt-1 max-w-sm">
+                Share updates, test notifications, and study reminders with the cohort.
+              </p>
+              <button
+                onClick={() => setShowAnnounceModal(true)}
+                className="mt-3 px-3.5 py-1.5 bg-[#56615a] hover:bg-[#424d46] text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" /> Post First Notice
+              </button>
+            </div>
+          ) : (
+            <ul className="flex flex-col divide-y divide-[#E4E2E1]">
+              {announcements.slice(0, 3).map((item) => (
+                <li key={item.id} className="py-3.5 first:pt-1 last:pb-1 flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#737874]">{item.timestamp}</span>
+                    {item.isUrgent && (
+                      <span className="text-[10px] uppercase font-bold text-[#ba1a1a] bg-[#ffdad6] px-2 py-0.5 rounded-full">
+                        Important
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-base md:text-lg font-semibold text-[#1b1c1c] leading-snug">
+                    {item.title}
                   </p>
-                )}
-              </li>
-            ))}
-          </ul>
+                  {item.description && (
+                    <p className="text-xs md:text-sm text-[#434844] mt-0.5 line-clamp-2">
+                      {item.description}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         {/* Upcoming Exams Countdown */}
@@ -135,34 +165,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
 
-          <div className="flex flex-col items-center justify-center py-6 bg-[#F6F3F2] rounded-xl border border-[#E5E4E2]">
-            <span className="text-4xl md:text-5xl font-black text-[#1b1c1c] tracking-tight">
-              {nextExam ? nextExam.daysRemaining : 12}
-            </span>
-            <span className="text-xs font-semibold text-[#737874] uppercase tracking-wider mt-1">
-              Days until
-            </span>
-            <span className="text-lg md:text-xl font-bold text-[#1b1c1c] mt-1 text-center px-4">
-              {nextExam ? nextExam.subjectName : 'Data Structures'}
-            </span>
-            <span className="text-xs text-[#737874] mt-1 font-medium">
-              {nextExam ? nextExam.date : 'Sep 05, 2026'}
-            </span>
-          </div>
+          {nextExam ? (
+            <>
+              <div className="flex flex-col items-center justify-center py-6 bg-[#F6F3F2] rounded-xl border border-[#E5E4E2]">
+                <span className="text-4xl md:text-5xl font-black text-[#1b1c1c] tracking-tight">
+                  {nextExam.daysRemaining ?? 0}
+                </span>
+                <span className="text-xs font-semibold text-[#737874] uppercase tracking-wider mt-1">
+                  {nextExam.daysRemaining !== undefined && nextExam.daysRemaining < 0
+                    ? 'Days since'
+                    : 'Days until'}
+                </span>
+                <span className="text-lg md:text-xl font-bold text-[#1b1c1c] mt-1 text-center px-4">
+                  {nextExam.subjectName}
+                </span>
+                <div className="flex items-center gap-2 mt-1.5">
+                  {(nextExam.examType || nextExam.venue) && (
+                    <span className="px-2.5 py-0.5 bg-[#56615a]/10 text-[#2c332e] text-[11px] font-extrabold rounded-full border border-[#56615a]/15">
+                      {nextExam.examType || nextExam.venue}
+                    </span>
+                  )}
+                  {nextExam.date && (
+                    <span className="text-xs text-[#737874] font-medium">
+                      {nextExam.date}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          {/* Progress Bar */}
-          <div className="w-full">
-            <div className="flex justify-between text-xs text-[#737874] font-medium mb-1.5">
-              <span>Preparation Timeline</span>
-              <span>{nextExam ? nextExam.progressPercent : 75}%</span>
+              {/* Progress Bar */}
+              <div className="w-full">
+                <div className="flex justify-between text-xs text-[#737874] font-medium mb-1.5">
+                  <span>Preparation Timeline</span>
+                  <span>{nextExam.progressPercent || 0}%</span>
+                </div>
+                <div className="w-full h-2.5 bg-[#E4E2E1] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#b2beb5] rounded-full transition-all duration-500"
+                    style={{ width: `${nextExam.progressPercent || 0}%` }}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 px-4 bg-[#F6F3F2] rounded-xl border border-[#E5E4E2] text-center">
+              <span className="text-sm font-bold text-[#1b1c1c]">No Exams Scheduled</span>
+              <p className="text-xs text-[#737874] mt-1 mb-3">
+                Click here to add exams or internal assessments to the timetable.
+              </p>
+              <span className="text-xs font-bold text-[#56615a] bg-white px-3 py-1.5 rounded-lg border border-[#E4E2E1]">
+                Open Timetable
+              </span>
             </div>
-            <div className="w-full h-2.5 bg-[#E4E2E1] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-[#b2beb5] rounded-full transition-all duration-500"
-                style={{ width: `${nextExam ? nextExam.progressPercent : 75}%` }}
-              />
-            </div>
-          </div>
+          )}
         </section>
 
         {/* Quick Links Section */}
@@ -190,6 +245,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             <span className="material-symbols-outlined text-[18px]">groups</span>
             Members
+          </button>
+          <button
+            id="quick-access-chat-btn"
+            onClick={() => onNavigate('chat')}
+            className="px-4 py-2 rounded-full bg-[#F6F3F2] hover:bg-[#F0EDED] border border-[#E4E2E1] text-[#1b1c1c] font-semibold text-xs md:text-sm transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[18px]">chat</span>
+            Cohort Chat
           </button>
           <button
             onClick={() => onNavigate('exams')}
@@ -222,38 +285,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {recentMaterials.map((file) => (
-              <div
-                key={file.id}
-                onClick={() => onPreviewMaterial(file)}
-                className="flex items-start gap-3.5 p-4 rounded-xl hover:bg-[#F6F3F2] transition-all group cursor-pointer border border-[#E5E4E2]/80 hover:border-[#b2beb5] hover:shadow-sm"
-              >
-                <div className="w-12 h-12 bg-[#b2beb5]/25 rounded-xl flex items-center justify-center text-[#56615a] flex-shrink-0 group-hover:bg-[#b2beb5]/40 transition-colors">
-                  <span
-                    className="material-symbols-outlined text-2xl"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    {getFileIcon(file.fileFormat)}
-                  </span>
-                </div>
-                <div className="flex flex-col min-w-0 flex-grow">
-                  <span className="text-sm font-bold text-[#1b1c1c] group-hover:text-[#56615a] transition-colors truncate">
-                    {file.title}
-                  </span>
-                  <span className="text-xs text-[#737874] mt-1 truncate">
-                    {file.fileFormat} • {file.uploadedBy.name}
-                  </span>
-                  <div className="flex items-center gap-2 text-[11px] text-[#737874] mt-1.5">
-                    <span className="bg-[#F0EDED] px-2 py-0.5 rounded text-[10px] font-semibold text-[#434844]">
-                      {file.subjectCode}
+          {recentMaterials.length === 0 ? (
+            <div className="py-12 border-2 border-dashed border-[#E5E4E2] rounded-2xl flex flex-col items-center justify-center text-center p-6 bg-[#FAF9F7]">
+              <div className="w-12 h-12 rounded-full bg-[#F0EDED] flex items-center justify-center text-[#56615a] mb-3">
+                <FileText className="w-6 h-6" />
+              </div>
+              <h4 className="text-base font-bold text-[#1b1c1c]">No materials uploaded yet</h4>
+              <p className="text-xs text-[#737874] max-w-sm mt-1 mb-4">
+                Share handwritten notes, lecture slides, question banks, or past exam papers with your classmates.
+              </p>
+              {onOpenUpload && (
+                <button
+                  onClick={() => onOpenUpload()}
+                  className="px-4 py-2 bg-[#56615a] hover:bg-[#424d46] text-white text-xs font-bold rounded-xl transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Upload First Material
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
+              {recentMaterials.map((file) => (
+                <div
+                  key={file.id}
+                  onClick={() => onPreviewMaterial(file)}
+                  className="flex items-start gap-3.5 p-4 rounded-xl hover:bg-[#F6F3F2] transition-all group cursor-pointer border border-[#E5E4E2]/80 hover:border-[#b2beb5] hover:shadow-sm"
+                >
+                  <div className="w-12 h-12 bg-[#b2beb5]/25 rounded-xl flex items-center justify-center text-[#56615a] flex-shrink-0 group-hover:bg-[#b2beb5]/40 transition-colors">
+                    <span
+                      className="material-symbols-outlined text-2xl"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      {getFileIcon(file.fileFormat)}
                     </span>
-                    <span>{file.fileSize}</span>
+                  </div>
+                  <div className="flex flex-col min-w-0 flex-grow">
+                    <span className="text-sm font-bold text-[#1b1c1c] group-hover:text-[#56615a] transition-colors truncate">
+                      {file.title}
+                    </span>
+                    <span className="text-xs text-[#737874] mt-1 truncate">
+                      {file.fileFormat} • {file.uploadedBy.name}
+                    </span>
+                    <div className="flex items-center gap-2 text-[11px] text-[#737874] mt-1.5">
+                      <span className="bg-[#F0EDED] px-2 py-0.5 rounded text-[10px] font-semibold text-[#434844]">
+                        {file.subjectCode}
+                      </span>
+                      <span>{file.fileSize}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
 

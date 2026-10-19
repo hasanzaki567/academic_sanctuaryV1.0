@@ -1,6 +1,6 @@
 import React from 'react';
 import { User, Material, Classroom } from '../types';
-import { FileText, Bookmark, Download, Award, ShieldCheck, Mail, School, Users, LogIn, LogOut, Sparkles } from 'lucide-react';
+import { FileText, Bookmark, Download, Award, ShieldCheck, Mail, School, Users, KeyRound, LogOut, Sparkles, ArrowLeft } from 'lucide-react';
 
 interface ProfileViewProps {
   user: User;
@@ -9,6 +9,7 @@ interface ProfileViewProps {
   onPreviewMaterial: (material: Material) => void;
   onOpenAuth: (mode?: 'login' | 'signup') => void;
   onSignOut: () => void;
+  onBack?: () => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -18,11 +19,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onPreviewMaterial,
   onOpenAuth,
   onSignOut,
+  onBack,
 }) => {
   const userUploads = materials.filter((m) => m.uploadedBy.id === user.id);
 
   return (
-    <main className="w-full max-w-[1280px] mx-auto px-4 md:px-16 py-8 md:py-10 pb-32 min-h-screen">
+    <main className="w-full px-4 sm:px-6 md:px-8 lg:px-10 py-6 md:py-8 pb-32 min-h-screen">
+      {/* Back button */}
+      {onBack && (
+        <div className="mb-4">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F0EDED] hover:bg-[#E4E2E1] text-[#434844] hover:text-[#1b1c1c] text-xs font-bold transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Previous Screen</span>
+          </button>
+        </div>
+      )}
+
       <div className="bg-[#FEFEFA] border border-[#E5E4E2] rounded-3xl p-6 md:p-10 shadow-[0_4px_20px_rgba(51,51,51,0.03)] mb-8">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 text-center sm:text-left">
           <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-[#E4E2E1] border-2 border-[#C3C8C3] overflow-hidden flex-shrink-0 shadow-md">
@@ -107,8 +122,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   onClick={() => onOpenAuth('login')}
                   className="px-3.5 py-2 bg-white border border-[#E5E4E2] hover:bg-[#F0EDED] text-[#434844] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <LogIn className="w-3.5 h-3.5 text-[#56615a]" />
-                  <span>Sign In</span>
+                  <KeyRound className="w-3.5 h-3.5 text-[#56615a]" />
+                  <span>Switch User</span>
                 </button>
                 <button
                   onClick={onSignOut}

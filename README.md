@@ -19,13 +19,7 @@ A collaborative digital library and classroom workspace for college cohorts to s
 
 ##contributor
 
-hasan zaki (hi)
-
-Firdhouse
-
-Mohammed Affan H
-
-Mohammed Shabeer W
+hasan zaki 
 
 
 ## 🌟 Overview
