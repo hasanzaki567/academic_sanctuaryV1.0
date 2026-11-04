@@ -201,23 +201,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
 
       // 2. Fallback check for accounts registered directly on local database
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      let resData: any = null;
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
 
-      const resData = await res.json();
-      if (res.ok && resData.user) {
-        confetti({ particleCount: 50, spread: 60 });
-        onAuthSuccess(resData.user, resData.classroom, resData.message || 'Signed in successfully!');
-        onClose();
-        return;
+        const text = await res.text();
+        try {
+          resData = text ? JSON.parse(text) : {};
+        } catch {
+          resData = null;
+        }
+
+        if (res.ok && resData?.user) {
+          confetti({ particleCount: 50, spread: 60 });
+          onAuthSuccess(resData.user, resData.classroom, resData.message || 'Signed in successfully!');
+          onClose();
+          return;
+        }
+
+        if (res.status === 401 && resData?.error) {
+          setErrorMessage(resData.error);
+          return;
+        }
+      } catch (localErr) {
+        // Fallback fetch error ignored
       }
 
       // 3. Return clear error message on incorrect email or password
-      if (res.status === 401) {
-        setErrorMessage(resData.error || 'Incorrect password. Please verify your credentials and try again.');
+      if (
+        supabaseError?.message?.toLowerCase().includes('email not confirmed') ||
+        supabaseError?.code === 'email_not_confirmed'
+      ) {
+        setErrorMessage(
+          'Your email has not been verified yet. Please check your inbox and click the verification link to log in.'
+        );
       } else if (supabaseError) {
         setErrorMessage(
           supabaseError.message === 'Invalid login credentials'
@@ -225,7 +246,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             : supabaseError.message
         );
       } else {
-        setErrorMessage(resData.error || 'Invalid email or password. Please verify your credentials and try again.');
+        setErrorMessage(resData?.error || 'Invalid email or password. Please verify your credentials and try again.');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'An unexpected error occurred during login.');
@@ -289,7 +310,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       // Register user through Supabase Auth or Local Server
       // 1. Try Supabase Auth first if configured
-      let supabaseSuccess = false;
+      let supabaseError: any = null;
       try {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
@@ -302,7 +323,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           },
         });
 
-        if (!error && data?.user) {
+        if (error) {
+          supabaseError = error;
+        } else if (data?.user) {
+          // If Supabase returned identities: [] it means email is already registered
+          if (data.user.identities && data.user.identities.length === 0) {
+            setErrorMessage('An account with this email is already registered. Please sign in instead.');
+            setLoading(false);
+            return;
+          }
+
           try {
             await supabase
               .from('profiles')
@@ -333,36 +363,87 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           onAuthSuccess(appUser, appClassroom, 'Account created and authenticated successfully!');
           onClose();
-          supabaseSuccess = true;
           return;
         }
-      } catch (sbErr) {
-        // Fall back to server registration
+      } catch (sbErr: any) {
+        supabaseError = sbErr;
       }
 
-      // 2. Fallback to local server database (/api/auth/signup)
-      const res = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: trimmedFullName,
-          email: trimmedEmail,
-          password: signupPassword,
-          regNo: trimmedRegNo,
-          rollNumber: trimmedRegNo,
-          department: 'Computer Science & Engineering',
-        }),
-      });
+      // If Supabase gave an explicit error, handle it cleanly and stop
+      if (supabaseError) {
+        if (
+          supabaseError.status === 429 ||
+          supabaseError.code === 'over_email_send_rate_limit' ||
+          supabaseError.message?.toLowerCase().includes('rate limit') ||
+          supabaseError.message?.toLowerCase().includes('security purposes')
+        ) {
+          setErrorMessage(
+            'For security purposes, please wait a few seconds before requesting another confirmation email.'
+          );
+          setLoading(false);
+          return;
+        }
 
-      const resData = await res.json();
-      if (res.ok && resData.user) {
-        confetti({ particleCount: 70, spread: 80 });
-        onAuthSuccess(resData.user, resData.classroom || null, resData.message || 'Account created successfully!');
-        onClose();
-        return;
+        if (
+          supabaseError.status === 422 ||
+          supabaseError.message?.toLowerCase().includes('already registered') ||
+          supabaseError.message?.toLowerCase().includes('already exists')
+        ) {
+          setErrorMessage('An account with this email is already registered. Please sign in instead.');
+          setLoading(false);
+          return;
+        }
+
+        if (supabaseError.message) {
+          setErrorMessage(supabaseError.message);
+          setLoading(false);
+          return;
+        }
       }
 
-      setErrorMessage(resData.error || 'Registration failed. Please check your details and try again.');
+      // 2. Fallback to local server database (/api/auth/signup) only if Supabase had no response
+      let resData: any = null;
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: trimmedFullName,
+            email: trimmedEmail,
+            password: signupPassword,
+            regNo: trimmedRegNo,
+            rollNumber: trimmedRegNo,
+            department: 'Computer Science & Engineering',
+          }),
+        });
+
+        const text = await res.text();
+        try {
+          resData = text ? JSON.parse(text) : {};
+        } catch {
+          resData = null;
+        }
+
+        if (res.ok && resData?.user) {
+          confetti({ particleCount: 70, spread: 80 });
+          onAuthSuccess(resData.user, resData.classroom || null, resData.message || 'Account created successfully!');
+          onClose();
+          return;
+        }
+
+        if (resData?.error) {
+          setErrorMessage(resData.error);
+          return;
+        }
+      } catch (fetchErr) {
+        // Fallback fetch error ignored
+      }
+
+      setErrorMessage(
+        supabaseError?.message ||
+        resData?.error ||
+        'Registration failed. Please check your details and try again.'
+      );
     } catch (err: any) {
       setErrorMessage(err.message || 'An unexpected error occurred during registration.');
     } finally {
@@ -386,19 +467,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     try {
+      // 1. Try Supabase password reset email first
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/#reset-password`,
+        });
+        if (!error) {
+          setSuccessMessage(`A password reset link has been sent to ${email}. Please check your inbox.`);
+          setLoading(false);
+          return;
+        }
+      } catch (sbErr) {
+        // Fallback to local OTP
+      }
+
+      // 2. Fallback to local OTP service
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
 
-      const data = await res.json();
-      if (res.ok) {
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = null;
+      }
+
+      if (res.ok && data?.otp) {
         setSimulatedOtp(data.otp);
         setSuccessMessage(`A 6-digit verification OTP has been sent to ${email}.`);
         setMode('verify-otp');
       } else {
-        setErrorMessage(data.error || 'Failed to send OTP code. Please check your email.');
+        setErrorMessage(data?.error || 'Failed to send OTP code. Please check your email.');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Error connecting to authentication service.');
@@ -452,7 +555,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = null;
+      }
+
       if (res.ok) {
         confetti({ particleCount: 60, spread: 70 });
         setSuccessMessage('Password changed successfully! You can now sign in with your new password.');
@@ -464,7 +574,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setConfirmNewPassword('');
         setMode('login');
       } else {
-        setErrorMessage(data.error || 'Failed to verify OTP. Please try again.');
+        setErrorMessage(data?.error || 'Failed to verify OTP. Please try again.');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Error connecting to authentication server.');
