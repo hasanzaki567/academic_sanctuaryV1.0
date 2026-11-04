@@ -71,6 +71,11 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
   useEffect(() => {
+    if (subjects.length === 0) {
+      setSubjectMode('manual');
+    } else if (!subjectId) {
+      setSubjectId(subjects[0].id);
+    }
     if (defaultSubjectId) {
       setSubjectId(defaultSubjectId);
       setSubjectMode('dropdown');
@@ -78,7 +83,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
     if (defaultExamType) {
       setRecommendedExam(defaultExamType);
     }
-  }, [defaultSubjectId, defaultExamType, isOpen]);
+  }, [defaultSubjectId, defaultExamType, isOpen, subjects]);
 
   // Selected subject's specific upcoming exams
   const selectedSubject = subjects.find((s) => s.id === subjectId);
@@ -222,7 +227,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               </div>
             </div>
 
-            {subjectMode === 'dropdown' ? (
+            {subjectMode === 'dropdown' && subjects.length > 0 ? (
               <div>
                 <select
                   value={subjectId}

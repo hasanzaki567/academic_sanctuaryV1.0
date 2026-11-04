@@ -24,59 +24,6 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-export const DEMO_USERS = [
-  {
-    id: 'user-sarah',
-    name: 'Sarah Jenkins',
-    email: 'sarah.j@oxford.edu',
-    role: 'super_admin' as const,
-    roleTitle: 'Super Admin (Class Rep)',
-    badgeColor: 'bg-amber-100 text-amber-900 border-amber-300',
-    cohortName: 'Oxford • B.Tech CSE \'26',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-  },
-  {
-    id: 'user-michael',
-    name: 'Michael Klein',
-    email: 'michael.k@oxford.edu',
-    role: 'admin' as const,
-    roleTitle: 'Admin',
-    badgeColor: 'bg-emerald-100 text-emerald-900 border-emerald-300',
-    cohortName: 'Oxford • B.Tech CSE \'26',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-  },
-  {
-    id: 'user-elena',
-    name: 'Elena Rostova',
-    email: 'elena.r@oxford.edu',
-    role: 'student' as const,
-    roleTitle: 'Student',
-    badgeColor: 'bg-blue-100 text-blue-900 border-blue-300',
-    cohortName: 'Oxford • B.Tech CSE \'26',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-  },
-  {
-    id: 'user-david',
-    name: 'David Chen',
-    email: 'david.c@oxford.edu',
-    role: 'student' as const,
-    roleTitle: 'Student',
-    badgeColor: 'bg-blue-100 text-blue-900 border-blue-300',
-    cohortName: 'Oxford • B.Tech CSE \'26',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-  },
-  {
-    id: 'user-alex',
-    name: 'Alex Turner',
-    email: 'alex.t@stanford.edu',
-    role: 'super_admin' as const,
-    roleTitle: 'Super Admin',
-    badgeColor: 'bg-purple-100 text-purple-900 border-purple-300',
-    cohortName: 'Stanford • AI & Data \'26',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A',
-  },
-];
-
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -230,8 +177,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     try {
-      // 1. Try Supabase Auth first
-      let supabaseSuccess = false;
+      // 1. Try Supabase Auth for registered users
+      let supabaseError: any = null;
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
@@ -243,14 +190,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           const { user: appUser, classroom: appClassroom } = await buildAppUser(data.user);
           onAuthSuccess(appUser, appClassroom, 'Signed in successfully with Supabase Auth!');
           onClose();
-          supabaseSuccess = true;
           return;
         }
-      } catch (sbErr) {
-        // Fall back to local demo server
+
+        if (error) {
+          supabaseError = error;
+        }
+      } catch (sbErr: any) {
+        supabaseError = sbErr;
       }
 
-      // 2. Fallback to local demo backend API (/api/auth/login)
+      // 2. Fallback check for accounts registered directly on local database
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -265,38 +215,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
 
-      setErrorMessage(resData.error || 'Invalid email or password. Please verify your credentials and try again.');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred during login.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 1b. Handle Quick Demo Login
-  const handleQuickDemoLogin = async (demo: typeof DEMO_USERS[0]) => {
-    setLoading(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    setLoginEmail(demo.email);
-    setLoginPassword('password123');
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: demo.email, password: 'password123' }),
-      });
-      const data = await res.json();
-      if (res.ok && data.user) {
-        confetti({ particleCount: 55, spread: 70 });
-        onAuthSuccess(data.user, data.classroom, data.message || `Logged in as ${demo.name}!`);
-        onClose();
+      // 3. Return clear error message on incorrect email or password
+      if (res.status === 401) {
+        setErrorMessage(resData.error || 'Incorrect password. Please verify your credentials and try again.');
+      } else if (supabaseError) {
+        setErrorMessage(
+          supabaseError.message === 'Invalid login credentials'
+            ? 'Invalid email or password. Please verify your credentials and try again.'
+            : supabaseError.message
+        );
       } else {
-        setErrorMessage(data.error || 'Could not authenticate demo user.');
+        setErrorMessage(resData.error || 'Invalid email or password. Please verify your credentials and try again.');
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Error connecting to demo authentication server.');
+      setErrorMessage(err.message || 'An unexpected error occurred during login.');
     } finally {
       setLoading(false);
     }
@@ -710,63 +642,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* A. LOGIN FORM */}
         {mode === 'login' && !emailConfirmationSent && (
           <form onSubmit={handleLoginSubmit} className="space-y-6">
-            {/* Quick Demo Accounts Selection */}
-            <div className="bg-[#f4f6f4] border-2 border-[#d2dcd4] rounded-2xl p-4 sm:p-5 shadow-xs">
-              <div className="flex items-center justify-between mb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-[#56615a] text-white flex items-center justify-center">
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-[#1b1c1c]">
-                    Quick Demo Accounts (1-Click Login)
-                  </span>
-                </div>
-                <span className="text-[11px] font-bold text-[#56615a] bg-white px-2.5 py-0.5 rounded-full border border-[#d2dcd4]">
-                  Interactive
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm text-[#56615a] mb-3 font-medium">
-                Click any profile to instantly sign in with full demo data, chats, and cohort permissions:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {DEMO_USERS.map((demo) => (
-                  <button
-                    key={demo.id}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => handleQuickDemoLogin(demo)}
-                    className="flex items-center gap-3 p-2.5 sm:p-3 bg-white hover:bg-[#ebf0ec] active:scale-[0.98] border border-[#CCD6CF] hover:border-[#56615a] rounded-xl text-left transition-all group shadow-2xs cursor-pointer disabled:opacity-50"
-                  >
-                    <img
-                      src={demo.avatar}
-                      alt={demo.name}
-                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover border border-[#D8DED9] shrink-0"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <span className="text-xs sm:text-sm font-bold text-[#1b1c1c] truncate group-hover:text-[#2d312e]">
-                          {demo.name}
-                        </span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${demo.badgeColor}`}>
-                          {demo.roleTitle}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-[#737874] truncate block">
-                        {demo.cohortName}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative flex items-center justify-center my-4">
-              <div className="border-t border-[#D8D6D4] w-full" />
-              <span className="bg-[#FAF9F5] px-3 text-xs font-bold text-[#737874] uppercase tracking-wider shrink-0">
-                Or Sign In with Credentials
-              </span>
-              <div className="border-t border-[#D8D6D4] w-full" />
-            </div>
             <div>
               <label className="text-sm sm:text-base font-bold text-[#2d312e] uppercase tracking-wide block mb-2">
                 Email Address <span className="text-[#ba1a1a]">*</span>

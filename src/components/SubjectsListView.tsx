@@ -138,10 +138,10 @@ export const SubjectsListView: React.FC<SubjectsListViewProps> = ({
             <div className="mt-6 pt-4 border-t border-[#E4E2E1] flex items-center justify-between">
               <div className="flex items-center gap-3 text-xs text-[#737874]">
                 <span className="flex items-center gap-1">
-                  <FileText className="w-3.5 h-3.5 text-[#56615a]" /> {subject.notesCount || 8} Notes
+                  <FileText className="w-3.5 h-3.5 text-[#56615a]" /> {subject.notesCount || 0} Notes
                 </span>
                 <span>•</span>
-                <span>{subject.pyqsCount || 4} PYQs</span>
+                <span>{subject.pyqsCount || 0} PYQs</span>
               </div>
               <span className="w-8 h-8 rounded-full bg-[#F0EDED] group-hover:bg-[#56615a] group-hover:text-white flex items-center justify-center transition-all">
                 <ChevronRight className="w-4 h-4 text-[#737874] group-hover:text-white" />
@@ -150,6 +150,29 @@ export const SubjectsListView: React.FC<SubjectsListViewProps> = ({
           </div>
         ))}
       </div>
+
+      {filtered.length === 0 && (
+        <div className="bg-[#FEFEFA] border border-[#E5E4E2] rounded-2xl p-12 text-center shadow-xs flex flex-col items-center mt-6">
+          <div className="w-12 h-12 rounded-2xl bg-[#d9e6dc] text-[#56615a] flex items-center justify-center mb-3">
+            <BookOpen className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-[#1b1c1c]">
+            {search ? `No courses match "${search}"` : 'No Courses Added Yet'}
+          </h3>
+          <p className="text-xs text-[#737874] max-w-sm mt-1">
+            {search
+              ? 'Try searching by different keywords or clear the search field.'
+              : 'Start organizing your semester curriculum by adding your subjects and courses.'}
+          </p>
+          <button
+            onClick={handleOpenAdd}
+            className="mt-4 px-4 py-2 bg-[#56615a] hover:bg-[#434d46] text-white text-xs font-bold rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add First Course</span>
+          </button>
+        </div>
+      )}
 
       {/* Add Subject Modal */}
       {showAddModal && (

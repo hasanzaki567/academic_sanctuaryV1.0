@@ -30,511 +30,15 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-// Full Interactive Demo Database
-let classrooms: any[] = [
-  {
-    id: 'cls-1',
-    code: 'BTECH26A',
-    name: 'B.Tech CSE 2026 - Section A',
-    collegeName: 'Oxford University',
-    location: 'Oxford, United Kingdom',
-    department: 'Department of Computer Science & Engineering',
-    course: 'B.Tech Computer Science & Engineering',
-    degreeLevel: 'undergraduate',
-    batchYear: '2026',
-    section: 'Section A',
-    semester: 'Semester 5',
-    superAdminId: 'user-sarah',
-    memberCount: 64,
-    createdAt: '2024-08-15',
-  },
-  {
-    id: 'cls-2',
-    code: 'AIDS26A',
-    name: 'B.Tech AI & Data Science 2026',
-    collegeName: 'Stanford University',
-    location: 'Stanford, California, USA',
-    department: 'School of Engineering & AI',
-    course: 'B.Tech Artificial Intelligence',
-    degreeLevel: 'undergraduate',
-    batchYear: '2026',
-    section: 'Section A',
-    semester: 'Semester 5',
-    superAdminId: 'user-alex',
-    memberCount: 42,
-    createdAt: '2024-08-20',
-  },
-];
-
-let registeredUsers: any[] = [
-  {
-    id: 'user-sarah',
-    name: 'Sarah Jenkins',
-    email: 'sarah.j@oxford.edu',
-    password: 'password123',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-    role: 'super_admin',
-    department: 'Computer Science',
-    rollNumber: 'CS22B042',
-    classroomId: 'cls-1',
-  },
-  {
-    id: 'user-elena',
-    name: 'Elena Rostova',
-    email: 'elena.r@oxford.edu',
-    password: 'password123',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    role: 'student',
-    department: 'Computer Science',
-    rollNumber: 'CS22B029',
-    classroomId: 'cls-1',
-  },
-  {
-    id: 'user-michael',
-    name: 'Michael Klein',
-    email: 'michael.k@oxford.edu',
-    password: 'password123',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    role: 'admin',
-    department: 'Computer Science',
-    rollNumber: 'CS22B018',
-    classroomId: 'cls-1',
-  },
-  {
-    id: 'user-david',
-    name: 'David Chen',
-    email: 'david.c@oxford.edu',
-    password: 'password123',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-    role: 'student',
-    department: 'Computer Science',
-    rollNumber: 'CS22B011',
-    classroomId: 'cls-1',
-  },
-  {
-    id: 'user-alex',
-    name: 'Alex Turner',
-    email: 'alex.t@stanford.edu',
-    password: 'password123',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A',
-    role: 'super_admin',
-    department: 'School of Engineering & AI',
-    rollNumber: 'AI24B001',
-    classroomId: 'cls-2',
-  },
-];
-
+// Application Database Collections
+let classrooms: any[] = [];
+let registeredUsers: any[] = [];
 let currentUser: any = null;
-
-let subjects: any[] = [
-  {
-    id: 'sub-ds',
-    classroomId: 'cls-1',
-    code: 'CS301',
-    name: 'Data Structures',
-    professor: 'Prof. Alan Turing',
-    description: 'Fundamental concepts of data organization, algorithms, and complexity analysis essential for efficient software development.',
-    creditHours: 4,
-    materialsCount: 14,
-    notesCount: 8,
-    pyqsCount: 5,
-  },
-  {
-    id: 'sub-os',
-    classroomId: 'cls-1',
-    code: 'CS302',
-    name: 'Operating Systems',
-    professor: 'Prof. A. Kumar',
-    description: 'Concurrency, process management, memory virtualisation, file systems and distributed operating system architectures.',
-    creditHours: 4,
-    materialsCount: 18,
-    notesCount: 11,
-    pyqsCount: 6,
-  },
-  {
-    id: 'sub-algo',
-    classroomId: 'cls-1',
-    code: 'CS303',
-    name: 'Algorithm Analysis',
-    professor: 'Dr. S. Gupta',
-    description: 'Asymptotic notation, dynamic programming, divide-and-conquer, greedy heuristics, NP-completeness and graph algorithms.',
-    creditHours: 4,
-    materialsCount: 12,
-    notesCount: 7,
-    pyqsCount: 4,
-  },
-  {
-    id: 'sub-cn',
-    classroomId: 'cls-1',
-    code: 'CS304',
-    name: 'Computer Networks',
-    professor: 'Dr. N. Singh',
-    description: 'OSI & TCP/IP stack layers, routing protocols, flow and congestion control, socket programming and network security.',
-    creditHours: 3,
-    materialsCount: 16,
-    notesCount: 9,
-    pyqsCount: 5,
-  },
-  {
-    id: 'sub-dbms',
-    classroomId: 'cls-1',
-    code: 'CS305',
-    name: 'Database Management Systems',
-    professor: 'Dr. E. Codd',
-    description: 'Relational algebra, SQL schema normalization, indexing, ACID transactions and distributed NoSQL systems.',
-    creditHours: 4,
-    materialsCount: 15,
-    notesCount: 10,
-    pyqsCount: 5,
-  },
-  {
-    id: 'sub-toc',
-    classroomId: 'cls-1',
-    code: 'CS306',
-    name: 'Theory of Computation',
-    professor: 'Prof. N. Chomsky',
-    description: 'Automata theory, regular expressions, context-free grammars, Turing machines, decidability and computational complexity.',
-    creditHours: 3,
-    materialsCount: 10,
-    notesCount: 6,
-    pyqsCount: 4,
-  },
-];
-
-let materials: any[] = [
-  {
-    id: 'mat-1',
-    subjectId: 'sub-ds',
-    subjectCode: 'CS301',
-    subjectName: 'Data Structures',
-    title: 'Trees & Graphs Deep Dive',
-    description: 'Comprehensive guide covering Binary Search Trees, AVL Trees, Red-Black Trees, Graph traversals (BFS/DFS), Dijkstra & A* shortest paths.',
-    type: 'notes',
-    fileFormat: 'PDF',
-    fileSize: '2.4 MB',
-    uploadedBy: {
-      id: 'user-sarah',
-      name: 'Sarah J.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-      role: 'super_admin',
-    },
-    uploadedDate: 'Aug 20, 2026',
-    createdAt: 1786500000000,
-    downloadsCount: 142,
-    viewsCount: 389,
-    isVerified: true,
-    tags: ['Trees', 'Graphs', 'BFS/DFS', 'AVL Trees'],
-    unit: 'Unit 3 & 4',
-    recommendedExam: 'SEM',
-    contentSnippet: '# Trees & Graphs Deep Dive\n\n## 1. Binary Search Trees (BST)\nA binary tree where every node in the left subtree has key <= node key, and right subtree has key > node key.\n\n### Balanced Trees\n- **AVL Trees**: Strict height balancing where balance factor BF = |h_L - h_R| <= 1.\n- **Rotations**: Single left (LL), single right (RR), double left-right (LR), double right-left (RL).\n\n## 2. Graph Algorithms\n- BFS: Uses Queue, O(V + E), shortest path in unweighted graphs.\n- DFS: Uses Stack / Recursion, cycle detection, topological sorting.\n- Dijkstra Algorithm: Greedy single-source shortest path with priority queue O((V + E) log V).',
-  },
-  {
-    id: 'mat-2',
-    subjectId: 'sub-ds',
-    subjectCode: 'CS301',
-    subjectName: 'Data Structures',
-    title: 'Sorting Algorithms Summary & Cheat Sheet',
-    description: 'Time & space complexity cheat sheet for Quicksort, Mergesort, Heapsort, Radix Sort, with stability analysis and edge-case code samples.',
-    type: 'notes',
-    fileFormat: 'PDF',
-    fileSize: '1.8 MB',
-    uploadedBy: {
-      id: 'user-michael',
-      name: 'Michael K.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-      role: 'admin',
-    },
-    uploadedDate: 'Aug 24, 2026',
-    createdAt: 1786800000000,
-    downloadsCount: 98,
-    viewsCount: 245,
-    isVerified: true,
-    tags: ['Sorting', 'Complexity', 'Quicksort', 'Heapsort'],
-    unit: 'Unit 2',
-    recommendedExam: 'IAT 1',
-    contentSnippet: '# Sorting Algorithms Quick Reference\n\n| Algorithm | Best | Average | Worst | Space | Stable? |\n|---|---|---|---|---|---|\n| Merge Sort | O(n log n) | O(n log n) | O(n log n) | O(n) | Yes |\n| Quick Sort | O(n log n) | O(n log n) | O(n^2) | O(log n) | No |\n| Heap Sort | O(n log n) | O(n log n) | O(n log n) | O(1) | No |\n| Insertion Sort | O(n) | O(n^2) | O(n^2) | O(1) | Yes |',
-  },
-  {
-    id: 'mat-3',
-    subjectId: 'sub-ds',
-    subjectCode: 'CS301',
-    subjectName: 'Data Structures',
-    title: 'Midterm Review Notes & Solved Problems',
-    description: 'Consolidated review questions and high-yield theorems for Midterm Exam 1. Includes solved problems from past 3 years.',
-    type: 'notes',
-    fileFormat: 'DOCX',
-    fileSize: '540 KB',
-    uploadedBy: {
-      id: 'user-elena',
-      name: 'Elena R.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-      role: 'student',
-    },
-    uploadedDate: 'Aug 28, 2026',
-    createdAt: 1787100000000,
-    downloadsCount: 167,
-    viewsCount: 412,
-    isVerified: true,
-    tags: ['Midterm', 'Exam Prep', 'Formulas'],
-    unit: 'Unit 1-3',
-    recommendedExam: 'IAT 1',
-    contentSnippet: '# Data Structures Midterm Review\n\n## Important Concepts Checklist:\n1. Array vs Linked List trade-offs in cache locality\n2. Stack applications (Infix to Postfix evaluation, Parentheses matching)\n3. Circular Queue implementation and modular arithmetic\n4. Hashing collision resolution (Chaining vs Open Addressing)',
-  },
-  {
-    id: 'mat-4',
-    subjectId: 'sub-os',
-    subjectCode: 'CS302',
-    subjectName: 'Operating Systems',
-    title: 'Process Synchronization & Semaphores',
-    description: 'Process Synchronization, Semaphores, Mutex Locks, Monitors, and Classic Synchronization Problems (Dining Philosophers, Readers-Writers).',
-    type: 'materials',
-    fileFormat: 'PDF',
-    fileSize: '3.1 MB',
-    uploadedBy: {
-      id: 'prof-kumar',
-      name: 'Prof. A. Kumar',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-      role: 'super_admin',
-    },
-    uploadedDate: 'Aug 31, 2026',
-    createdAt: 1787400000000,
-    downloadsCount: 215,
-    viewsCount: 520,
-    isVerified: true,
-    tags: ['Synchronization', 'Semaphores', 'Deadlocks'],
-    unit: 'Chapter 4',
-    recommendedExam: 'IAT 2',
-    contentSnippet: '# Process Synchronization\n\n## Critical Section Problem\nA code segment that accesses shared variables and must be executed atomically.\n\n### Requirements:\n1. Mutual Exclusion\n2. Progress\n3. Bounded Waiting\n\n### Semaphores\nInteger variable accessed only via atomic wait() [P] and signal() [V] operations.',
-  },
-  {
-    id: 'mat-5',
-    subjectId: 'sub-algo',
-    subjectCode: 'CS303',
-    subjectName: 'Algorithm Analysis',
-    title: 'Master Theorem & Divide and Conquer Recurrences',
-    description: 'Master Theorem proofs, divide and conquer recurrences, amortized analysis with aggregate and potential method.',
-    type: 'notes',
-    fileFormat: 'DOCX',
-    fileSize: '1.2 MB',
-    uploadedBy: {
-      id: 'user-michael',
-      name: 'Michael K.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-      role: 'admin',
-    },
-    uploadedDate: 'Sep 02, 2026',
-    createdAt: 1787700000000,
-    downloadsCount: 180,
-    viewsCount: 390,
-    isVerified: true,
-    tags: ['Master Theorem', 'Recurrences', 'Amortized'],
-    unit: 'Unit 1 & 2',
-    recommendedExam: 'IAT 2',
-    contentSnippet: '# Master Theorem Guide\n\nFor recurrence: `T(n) = aT(n/b) + f(n)`\n\nCompare f(n) with n^(log_b a):\n1. If f(n) = O(n^(log_b a - epsilon)), then T(n) = Theta(n^(log_b a))\n2. If f(n) = Theta(n^(log_b a)), then T(n) = Theta(n^(log_b a) * log n)\n3. If f(n) = Omega(n^(log_b a + epsilon)), then T(n) = Theta(f(n))',
-  },
-  {
-    id: 'mat-6',
-    subjectId: 'sub-cn',
-    subjectCode: 'CS304',
-    subjectName: 'Computer Networks',
-    title: 'OSI Model & Data Link Layer Lecture Slides',
-    description: 'Physical & Data Link Layer fundamentals, framing, CRC error detection, Sliding Window Protocols and HDLC.',
-    type: 'slides',
-    fileFormat: 'PPTX',
-    fileSize: '4.5 MB',
-    uploadedBy: {
-      id: 'dr-nsingh',
-      name: 'Dr. N. Singh',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-      role: 'admin',
-    },
-    uploadedDate: 'Sep 04, 2026',
-    createdAt: 1788000000000,
-    downloadsCount: 132,
-    viewsCount: 290,
-    isVerified: true,
-    tags: ['OSI Model', 'Data Link', 'CRC', 'Sliding Window'],
-    unit: 'Lecture 2',
-    recommendedExam: 'IAT 1',
-    contentSnippet: '# Computer Networks Lecture 2\n\n- Framing techniques: Character count, Byte stuffing, Bit stuffing\n- Cyclic Redundancy Check (CRC) polynomial division\n- Stop-and-Wait vs Go-Back-N vs Selective Repeat ARQ',
-  },
-  {
-    id: 'mat-7',
-    subjectId: 'sub-ds',
-    subjectCode: 'CS301',
-    subjectName: 'Data Structures',
-    title: '2023 Fall Midterm PYQ with Solutions',
-    description: 'Official Previous Year Question paper from Fall 2023 with step-by-step verified solutions and grading rubrics.',
-    type: 'pyqs',
-    fileFormat: 'PDF',
-    fileSize: '3.4 MB',
-    uploadedBy: {
-      id: 'user-sarah',
-      name: 'Sarah J.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-      role: 'super_admin',
-    },
-    uploadedDate: 'Sep 05, 2026',
-    createdAt: 1788300000000,
-    downloadsCount: 310,
-    viewsCount: 650,
-    isVerified: true,
-    tags: ['PYQ', '2023', 'Solved Paper'],
-    unit: 'Past Exam',
-    recommendedExam: 'IAT 1',
-    contentSnippet: '# 2023 Fall Midterm Exam Solutions\n\n### Q1: Construct an AVL tree by inserting [15, 20, 24, 10, 13, 7, 30, 36, 25]\nSolution: Shows step-by-step tree drawings and rotation triggers.\n\n### Q2: Prove that Dijkstra does not work for negative edge weights.\nSolution: Counterexample graph with 3 vertices.',
-  },
-  {
-    id: 'mat-8',
-    subjectId: 'sub-dbms',
-    subjectCode: 'CS305',
-    subjectName: 'Database Management Systems',
-    title: 'SQL, Normalization & ACID Transactions Sheet',
-    description: 'BCNF vs 3NF decomposition algorithms, serializability testing with precedence graphs, and 2-phase locking protocol.',
-    type: 'notes',
-    fileFormat: 'PDF',
-    fileSize: '3.0 MB',
-    uploadedBy: {
-      id: 'user-david',
-      name: 'David C.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-      role: 'student',
-    },
-    uploadedDate: 'Sep 04, 2026',
-    createdAt: 1788100000000,
-    downloadsCount: 240,
-    viewsCount: 510,
-    isVerified: true,
-    tags: ['BCNF', 'Normalization', 'ACID', 'Transactions'],
-    unit: 'Unit 3 & 4',
-    recommendedExam: 'IAT 2',
-    contentSnippet: '# Database Normalization & Transactions\n\n## Normal Forms:\n- 1NF: Atomic attribute values\n- 2NF: 1NF + No partial dependencies\n- 3NF: 2NF + No transitive dependencies (X -> A implies X is superkey OR A is prime attribute)\n- BCNF: X -> A implies X is superkey\n\n## ACID Properties:\n- Atomicity (All or nothing)\n- Consistency (Preserves database integrity)\n- Isolation (Concurrent transactions do not interfere)\n- Durability (Committed updates persist)',
-  },
-];
-
-let announcements: any[] = [
-  {
-    id: 'ann-1',
-    classroomId: 'cls-1',
-    title: 'Internal Exam Schedule Released for Mid-Semesters.',
-    description: 'Mid-semester examinations will commence from the 5th of next month. Please check the Exams tab for the complete timetable and seating arrangements.',
-    timestamp: 'Today, 09:00 AM',
-    author: 'Admin Office',
-    isUrgent: true,
-  },
-  {
-    id: 'ann-2',
-    classroomId: 'cls-1',
-    title: 'Guest Lecture: Advances in Machine Learning by Dr. V. Sharma in Hall 3.',
-    description: 'All 3rd-year CS students are requested to attend. Attendance will be counted towards the lab curriculum.',
-    timestamp: 'Yesterday',
-    author: 'Prof. Alan Turing',
-    isUrgent: false,
-  },
-  {
-    id: 'ann-3',
-    classroomId: 'cls-1',
-    title: 'Data Structures Assignment 3 Deadline Extended to Sunday Midnight.',
-    description: 'Submit your Tree traversal and Graph cycle detection assignments directly via the portal or notes submission tab.',
-    timestamp: '3 days ago',
-    author: 'Sarah Jenkins (Class Rep)',
-    isUrgent: false,
-  },
-];
-
-let exams: any[] = [
-  {
-    id: 'exam-1',
-    classroomId: 'cls-1',
-    subjectName: 'Data Structures',
-    subjectCode: 'CS301',
-    date: '2026-09-20',
-    daysRemaining: 6,
-    time: '10:00 AM - 01:00 PM',
-    examType: 'IAT 1',
-    venue: 'Hall 201',
-    progressPercent: 80,
-    isCompleted: false,
-  },
-  {
-    id: 'exam-2',
-    classroomId: 'cls-1',
-    subjectName: 'Theory of Computation',
-    subjectCode: 'CS306',
-    date: '2026-09-24',
-    daysRemaining: 10,
-    time: '10:00 AM - 01:00 PM',
-    examType: 'IAT 1',
-    venue: 'Hall 201',
-    progressPercent: 70,
-    isCompleted: false,
-  },
-  {
-    id: 'exam-3',
-    classroomId: 'cls-1',
-    subjectName: 'Computer Networks',
-    subjectCode: 'CS304',
-    date: '2026-09-28',
-    daysRemaining: 14,
-    time: '02:00 PM - 05:00 PM',
-    examType: 'IAT 1',
-    venue: 'Hall 204',
-    progressPercent: 65,
-    isCompleted: false,
-  },
-  {
-    id: 'exam-4',
-    classroomId: 'cls-1',
-    subjectName: 'Operating Systems',
-    subjectCode: 'CS302',
-    date: '2026-10-15',
-    daysRemaining: 31,
-    time: '10:00 AM - 01:00 PM',
-    examType: 'IAT 2',
-    venue: 'Hall 202',
-    progressPercent: 45,
-    isCompleted: false,
-  },
-];
-
-let members: any[] = [
-  {
-    id: 'user-sarah',
-    name: 'Sarah Jenkins',
-    email: 'sarah.j@oxford.edu',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-    role: 'super_admin',
-    rollNumber: 'CS22B042',
-    joinedDate: 'Aug 2024',
-  },
-  {
-    id: 'user-michael',
-    name: 'Michael Klein',
-    email: 'michael.k@oxford.edu',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    role: 'admin',
-    rollNumber: 'CS22B018',
-    joinedDate: 'Aug 2024',
-  },
-  {
-    id: 'user-elena',
-    name: 'Elena Rostova',
-    email: 'elena.r@oxford.edu',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    role: 'student',
-    rollNumber: 'CS22B029',
-    joinedDate: 'Sep 2024',
-  },
-  {
-    id: 'user-david',
-    name: 'David Chen',
-    email: 'david.c@oxford.edu',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-    role: 'student',
-    rollNumber: 'CS22B011',
-    joinedDate: 'Sep 2024',
-  },
-];
+let subjects: any[] = [];
+let materials: any[] = [];
+let announcements: any[] = [];
+let exams: any[] = [];
+let members: any[] = [];
 
 // API Endpoints
 app.get('/api/health', (req, res) => {
@@ -599,28 +103,14 @@ app.post('/api/auth/login', (req, res) => {
     (u) => u.email.toLowerCase() === cleanEmail
   );
 
+  // If user does not exist in registered database
+  if (!foundUser) {
+    return res.status(404).json({ error: 'No account found with this email address. Please check your email or sign up.' });
+  }
+
   // If user exists, check password
-  if (foundUser) {
-    if (foundUser.password && cleanPassword && foundUser.password !== cleanPassword) {
-      return res.status(401).json({ error: 'Invalid password for this institutional account. Please check your credentials.' });
-    }
-  } else {
-    // If student has an institution-provided credential not yet in memory, authenticate and register
-    const newId = `user-${Date.now()}`;
-    const nameFromEmail = cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-    
-    foundUser = {
-      id: newId,
-      name: nameFromEmail || 'University Student',
-      email: cleanEmail,
-      password: cleanPassword,
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-      role: 'student',
-      department: 'General Academic',
-      rollNumber: `STU${Math.floor(1000 + Math.random() * 9000)}`,
-      classroomId: null,
-    };
-    registeredUsers.push(foundUser);
+  if (foundUser.password && cleanPassword && foundUser.password !== cleanPassword) {
+    return res.status(401).json({ error: 'Incorrect password. Please verify your credentials or use Forgot Password.' });
   }
 
   currentUser = foundUser;
@@ -999,6 +489,27 @@ app.post('/api/classrooms', (req, res) => {
     });
   }
 
+  // Create general cohort chat group
+  const generalChatGroup: ChatGroupRecord = {
+    id: `group-${Date.now()}`,
+    classroomId: newClassroom.id,
+    name: `${newClassroom.name} General`,
+    description: `Official cohort discussion group for ${newClassroom.name}`,
+    avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(newClassroom.code)}`,
+    createdBy: activeUser.id,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    isDirect: false,
+    bannedUserIds: [],
+  };
+  chatGroups.push(generalChatGroup);
+  chatGroupMembers.push({
+    groupId: generalChatGroup.id,
+    userId: activeUser.id,
+    role: 'admin',
+    joinedAt: new Date().toISOString(),
+  });
+
   res.status(201).json(newClassroom);
 });
 
@@ -1008,41 +519,82 @@ app.post('/api/classrooms/join', (req, res) => {
     return res.status(400).json({ error: 'Classroom code is required' });
   }
 
-  const found = classrooms.find((c) => c.code.toLowerCase() === code.trim().toLowerCase());
-  if (found) {
-    found.memberCount += 1;
-    if (currentUser) {
-      currentUser.classroomId = found.id;
-      const reg = registeredUsers.find((u) => u.id === currentUser.id);
-      if (reg) reg.classroomId = found.id;
-    }
-    return res.json({ success: true, classroom: found });
+  const activeUser = getCurrentOrReqUser(req);
+  let targetClassroom = classrooms.find((c) => c.code.toLowerCase() === code.trim().toLowerCase());
+
+  if (targetClassroom) {
+    targetClassroom.memberCount += 1;
+  } else {
+    // Create new joined classroom if not found
+    targetClassroom = {
+      id: `cls-${Date.now()}`,
+      code: code.trim().toUpperCase(),
+      name: `Classroom ${code.trim().toUpperCase()}`,
+      collegeName: 'Partner University',
+      location: 'Campus',
+      department: 'Computer Science & Engineering',
+      course: 'B.Tech CSE',
+      degreeLevel: 'undergraduate',
+      batchYear: '2026',
+      section: 'Section B',
+      semester: 'Semester 5',
+      superAdminId: activeUser.id,
+      memberCount: 1,
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    classrooms.unshift(targetClassroom);
   }
 
-  // Create temporary joined classroom if code matches standard pattern
-  const joined = {
-    id: `cls-${Date.now()}`,
-    code: code.trim().toUpperCase(),
-    name: `Classroom ${code.trim().toUpperCase()}`,
-    collegeName: 'Partner University',
-    location: 'Campus',
-    department: 'Computer Science & Engineering',
-    course: 'B.Tech CSE',
-    degreeLevel: 'undergraduate',
-    batchYear: '2026',
-    section: 'Section B',
-    semester: 'Semester 5',
-    superAdminId: currentUser ? currentUser.id : 'admin',
-    memberCount: 1,
-    createdAt: new Date().toISOString().split('T')[0],
-  };
-  classrooms.unshift(joined);
+  activeUser.classroomId = targetClassroom.id;
   if (currentUser) {
-    currentUser.classroomId = joined.id;
-    const reg = registeredUsers.find((u) => u.id === currentUser.id);
-    if (reg) reg.classroomId = joined.id;
+    currentUser.classroomId = targetClassroom.id;
   }
-  res.json({ success: true, classroom: joined });
+  const reg = registeredUsers.find((u) => u.id === activeUser.id);
+  if (reg) reg.classroomId = targetClassroom.id;
+
+  // Add member if not already added
+  if (!members.some((m) => m.id === activeUser.id && m.classroomId === targetClassroom.id)) {
+    members.push({
+      id: activeUser.id,
+      name: activeUser.name,
+      email: activeUser.email,
+      avatar: activeUser.avatar,
+      role: 'student',
+      rollNumber: activeUser.rollNumber || `STU${members.length + 101}`,
+      joinedDate: 'Today',
+      classroomId: targetClassroom.id,
+      department: targetClassroom.department,
+    });
+  }
+
+  // Ensure general chat group exists and user is enrolled in it
+  let generalGroup = chatGroups.find((g) => g.classroomId === targetClassroom.id && !g.isDirect);
+  if (!generalGroup) {
+    generalGroup = {
+      id: `group-${Date.now()}`,
+      classroomId: targetClassroom.id,
+      name: `${targetClassroom.name} General`,
+      description: `Official cohort discussion group for ${targetClassroom.name}`,
+      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(targetClassroom.code)}`,
+      createdBy: targetClassroom.superAdminId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDirect: false,
+      bannedUserIds: [],
+    };
+    chatGroups.push(generalGroup);
+  }
+
+  if (!chatGroupMembers.some((m) => m.groupId === generalGroup.id && m.userId === activeUser.id)) {
+    chatGroupMembers.push({
+      groupId: generalGroup.id,
+      userId: activeUser.id,
+      role: 'member',
+      joinedAt: new Date().toISOString(),
+    });
+  }
+
+  res.json({ success: true, classroom: targetClassroom });
 });
 
 // Subjects
@@ -1275,10 +827,11 @@ app.post('/api/exams', (req, res) => {
 
   const { subjectName, subjectCode, date, time, examType, venue, isCompleted, classroomId } = req.body;
   
-  // Calculate days remaining dynamically relative to current date (2026-09-05)
+  // Calculate days remaining dynamically relative to current date
   let daysRemaining = 14;
   if (date) {
-    const today = new Date('2026-09-05T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const examDate = new Date(date + 'T00:00:00');
     const diff = examDate.getTime() - today.getTime();
     daysRemaining = Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -1289,7 +842,7 @@ app.post('/api/exams', (req, res) => {
     classroomId: classroomId || activeUser.classroomId || (classrooms[0]?.id || ''),
     subjectName: subjectName || 'Subject Exam',
     subjectCode: subjectCode || 'CS300',
-    date: date || '2026-09-20',
+    date: date || new Date().toISOString().split('T')[0],
     daysRemaining,
     time: time || '10:00 AM - 01:00 PM',
     examType: examType || venue || 'Exam',
@@ -1638,227 +1191,56 @@ interface ChatMessageRecord {
   starredBy?: string[];
 }
 
-// In-Memory Database Collections with Relational Indexes (Interactive Demo State)
-let chatGroups: ChatGroupRecord[] = [
-  {
-    id: 'grp-cohort-cls-1',
-    classroomId: 'cls-1',
-    name: 'BTECH26A - General Cohort',
-    avatar: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=150&auto=format&fit=crop&q=80',
-    description: 'Official cohort group for all Section A members to coordinate lectures, lab submissions, exam dates, and lecture notes.',
-    isDirect: false,
-    createdBy: 'user-sarah',
-    createdAt: '2026-08-15T09:00:00Z',
-    updatedAt: '2026-09-06T10:30:00Z',
-  },
-  {
-    id: 'grp-algo-prep',
-    classroomId: 'cls-1',
-    name: 'CS301 Data Structures & Algorithms Prep',
-    avatar: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=150&auto=format&fit=crop&q=80',
-    description: 'Daily algorithmic problem discussion, viva preparation, and dynamic programming tips.',
-    isDirect: false,
-    createdBy: 'user-elena',
-    createdAt: '2026-08-22T14:30:00Z',
-    updatedAt: '2026-09-06T09:15:00Z',
-  },
-  {
-    id: 'dm-sarah-elena',
-    classroomId: 'cls-1',
-    name: 'Elena Rostova',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    description: 'Direct Conversation',
-    isDirect: true,
-    createdBy: 'user-sarah',
-    createdAt: '2026-08-25T11:00:00Z',
-    updatedAt: '2026-09-06T08:45:00Z',
-  },
-  {
-    id: 'dm-sarah-michael',
-    classroomId: 'cls-1',
-    name: 'Michael Klein',
-    avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    description: 'Direct Conversation',
-    isDirect: true,
-    createdBy: 'user-sarah',
-    createdAt: '2026-08-26T14:00:00Z',
-    updatedAt: '2026-09-06T09:20:00Z',
-  },
-];
-
-let chatGroupMembers: GroupMemberRecord[] = [
-  // General cohort
-  { groupId: 'grp-cohort-cls-1', userId: 'user-sarah', role: 'admin', joinedAt: '2026-08-15T09:00:00Z' },
-  { groupId: 'grp-cohort-cls-1', userId: 'user-michael', role: 'admin', joinedAt: '2026-08-15T09:05:00Z' },
-  { groupId: 'grp-cohort-cls-1', userId: 'user-elena', role: 'member', joinedAt: '2026-08-15T09:10:00Z' },
-  { groupId: 'grp-cohort-cls-1', userId: 'user-david', role: 'member', joinedAt: '2026-08-15T09:15:00Z' },
-
-  // DSA Prep
-  { groupId: 'grp-algo-prep', userId: 'user-elena', role: 'admin', joinedAt: '2026-08-22T14:30:00Z' },
-  { groupId: 'grp-algo-prep', userId: 'user-sarah', role: 'member', joinedAt: '2026-08-22T14:32:00Z' },
-  { groupId: 'grp-algo-prep', userId: 'user-david', role: 'member', joinedAt: '2026-08-22T14:35:00Z' },
-  { groupId: 'grp-algo-prep', userId: 'user-michael', role: 'member', joinedAt: '2026-08-22T14:40:00Z' },
-
-  // Direct DM Sarah & Elena
-  { groupId: 'dm-sarah-elena', userId: 'user-sarah', role: 'admin', joinedAt: '2026-08-25T11:00:00Z' },
-  { groupId: 'dm-sarah-elena', userId: 'user-elena', role: 'admin', joinedAt: '2026-08-25T11:00:00Z' },
-
-  // Direct DM Sarah & Michael
-  { groupId: 'dm-sarah-michael', userId: 'user-sarah', role: 'admin', joinedAt: '2026-08-26T14:00:00Z' },
-  { groupId: 'dm-sarah-michael', userId: 'user-michael', role: 'admin', joinedAt: '2026-08-26T14:00:00Z' },
-];
-
-let chatMessages: ChatMessageRecord[] = [
-  {
-    id: 'msg-101',
-    groupId: 'grp-cohort-cls-1',
-    senderId: 'user-sarah',
-    senderName: 'Sarah Jenkins',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-    type: 'text',
-    content: 'Welcome everyone to the official BTECH26A cohort chat! You can forward lecture notes, snap textbook queries, and organize study sessions here.',
-    timestamp: 'Yesterday, 02:15 PM',
-    createdAt: Date.now() - 86400000 + 5000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    readBy: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    isPinned: true,
-  },
-  {
-    id: 'msg-102',
-    groupId: 'grp-cohort-cls-1',
-    senderId: 'user-michael',
-    senderName: 'Michael Klein',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    type: 'text',
-    content: 'I have verified and forwarded our Unit 3 Tree Traversals slides from the library. You can check them directly below:',
-    timestamp: 'Yesterday, 03:20 PM',
-    createdAt: Date.now() - 86400000 + 40000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    readBy: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    reactions: [{ emoji: '👍', userId: 'user-sarah', userName: 'Sarah Jenkins' }],
-  },
-  {
-    id: 'msg-103',
-    groupId: 'grp-cohort-cls-1',
-    senderId: 'user-michael',
-    senderName: 'Michael Klein',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    type: 'material_forward',
-    content: 'Unit 3 Binary Trees & Traversals Complete Slides',
-    forwardedMaterial: {
-      id: 'mat-1',
-      title: 'Trees & Graphs Deep Dive',
-      subjectCode: 'CS301',
-      subjectName: 'Data Structures',
-      type: 'notes',
-      fileFormat: 'PDF',
-      fileSize: '2.4 MB',
-      snippet: 'Binary search tree invariants, AVL tree balancing rotations, and Morris in-order traversal algorithms.',
-    },
-    timestamp: 'Yesterday, 03:22 PM',
-    createdAt: Date.now() - 86400000 + 45000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    readBy: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    reactions: [
-      { emoji: '❤️', userId: 'user-elena', userName: 'Elena Rostova' },
-      { emoji: '🔥', userId: 'user-david', userName: 'David Chen' },
-    ],
-  },
-  {
-    id: 'msg-104',
-    groupId: 'grp-cohort-cls-1',
-    senderId: 'user-elena',
-    senderName: 'Elena Rostova',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    type: 'text',
-    content: 'Super helpful Michael! Does anyone want to practice the previous year questions together before the IAT 1 exams?',
-    timestamp: 'Today, 09:30 AM',
-    createdAt: Date.now() - 3600000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-michael', 'user-david'],
-    readBy: ['user-sarah', 'user-elena'],
-  },
-  {
-    id: 'msg-201',
-    groupId: 'grp-algo-prep',
-    senderId: 'user-elena',
-    senderName: 'Elena Rostova',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    type: 'text',
-    content: 'Hey everyone, today we are tackling Dynamic Programming: 0/1 Knapsack vs Unbounded Knapsack. Drop your solutions below!',
-    timestamp: 'Today, 10:15 AM',
-    createdAt: Date.now() - 7200000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-david', 'user-michael'],
-    readBy: ['user-sarah', 'user-elena', 'user-david'],
-  },
-  {
-    id: 'msg-202',
-    groupId: 'grp-algo-prep',
-    senderId: 'user-david',
-    senderName: 'David Chen',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
-    type: 'text',
-    content: 'For 0/1 Knapsack, space can be optimized to 1D array iterating weights backwards from W down to wt[i]! O(W) space.',
-    timestamp: 'Today, 10:45 AM',
-    createdAt: Date.now() - 5400000,
-    deliveredTo: ['user-sarah', 'user-elena', 'user-david', 'user-michael'],
-    readBy: ['user-sarah', 'user-david'],
-    reactions: [{ emoji: '💡', userId: 'user-sarah', userName: 'Sarah Jenkins' }],
-  },
-  {
-    id: 'msg-dm-1',
-    groupId: 'dm-sarah-elena',
-    senderId: 'user-elena',
-    senderName: 'Elena Rostova',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    type: 'text',
-    content: 'Hi Sarah! Did you review the OS assignment rubric before submission?',
-    timestamp: 'Today, 11:20 AM',
-    createdAt: Date.now() - 3600000,
-    deliveredTo: ['user-sarah', 'user-elena'],
-    readBy: ['user-sarah', 'user-elena'],
-  },
-  {
-    id: 'msg-dm-2',
-    groupId: 'dm-sarah-elena',
-    senderId: 'user-sarah',
-    senderName: 'Sarah Jenkins',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
-    type: 'text',
-    content: 'Yes! Make sure the Peterson algorithm mutual exclusion proof is clearly drawn. See you in the lab this afternoon!',
-    timestamp: 'Today, 11:25 AM',
-    createdAt: Date.now() - 3300000,
-    deliveredTo: ['user-sarah', 'user-elena'],
-    readBy: ['user-sarah', 'user-elena'],
-  },
-  {
-    id: 'msg-dm-3',
-    groupId: 'dm-sarah-michael',
-    senderId: 'user-michael',
-    senderName: 'Michael Klein',
-    senderAvatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
-    type: 'text',
-    content: 'Hey Sarah, I uploaded the 2023 Fall Midterm PYQs to the repository. Added solutions for the AVL tree question.',
-    timestamp: 'Yesterday, 04:30 PM',
-    createdAt: Date.now() - 86400000 + 60000,
-    deliveredTo: ['user-sarah', 'user-michael'],
-    readBy: ['user-sarah', 'user-michael'],
-  },
-];
+// Chat Collections
+let chatGroups: ChatGroupRecord[] = [];
+let chatGroupMembers: GroupMemberRecord[] = [];
+let chatMessages: ChatMessageRecord[] = [];
 
 // Helper to safely get active user or request fallback
 function getCurrentOrReqUser(req?: express.Request) {
-  if (currentUser) return currentUser;
-  const headerUserId = req ? ((req.headers['x-user-id'] as string) || (req.query.userId as string)) : undefined;
+  const headerUserId = req
+    ? ((req.headers['x-user-id'] as string) ||
+       (req.query.userId as string) ||
+       (req.body && req.body.userId as string))
+    : undefined;
+
   if (headerUserId) {
-    const found = registeredUsers.find((u) => u.id === headerUserId) || members.find((m) => m.id === headerUserId);
+    if (currentUser && currentUser.id === headerUserId) return currentUser;
+    const found =
+      registeredUsers.find((u) => u.id === headerUserId) ||
+      members.find((m) => m.id === headerUserId);
     if (found) return found;
+
+    const headerUserName = req
+      ? ((req.headers['x-user-name'] as string) || (req.body && req.body.userName as string))
+      : undefined;
+    const headerUserRole = req
+      ? ((req.headers['x-user-role'] as string) || (req.body && req.body.userRole as string))
+      : undefined;
+    const headerUserEmail = req
+      ? ((req.headers['x-user-email'] as string) || (req.body && req.body.userEmail as string))
+      : undefined;
+
+    return {
+      id: headerUserId,
+      name: headerUserName || 'Classmate',
+      email: headerUserEmail || 'student@academic.edu',
+      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(headerUserId)}`,
+      role: (headerUserRole as any) || 'super_admin',
+      department: 'Academic Sanctuary',
+      rollNumber: 'STU001',
+      classroomId: classrooms[0]?.id || '',
+    };
   }
+
+  if (currentUser) return currentUser;
+
   return {
     id: 'user-guest',
     name: 'Classmate',
     email: 'student@academic.edu',
     avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
-    role: 'student',
+    role: 'super_admin',
     department: 'General Studies',
     rollNumber: 'STU001',
     classroomId: classrooms[0]?.id || '',
