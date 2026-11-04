@@ -414,8 +414,23 @@ export const NotesRepositoryView: React.FC<NotesRepositoryViewProps> = ({
         {filteredSubjects.length === 0 && (
           <div className="text-center py-16 bg-white border border-[#E5E4E2] rounded-2xl p-8 mt-6">
             <BookOpen className="w-12 h-12 text-[#737874] mx-auto mb-2" />
-            <h4 className="text-lg font-bold text-[#1b1c1c]">No subjects matched "{subjectSearch}"</h4>
-            <p className="text-xs text-[#737874] mt-1">Try searching by course code like CS301 or course title.</p>
+            <h4 className="text-lg font-bold text-[#1b1c1c]">
+              {subjectSearch ? `No subjects matched "${subjectSearch}"` : 'No courses in this cohort yet'}
+            </h4>
+            <p className="text-xs text-[#737874] mt-1 max-w-sm mx-auto">
+              {subjectSearch
+                ? 'Try searching by course code like CS301 or course title.'
+                : 'Upload study materials or add subjects to this cohort to view subject notes repositories.'}
+            </p>
+            {!subjectSearch && onOpenUpload && (
+              <button
+                onClick={() => onOpenUpload()}
+                className="mt-4 px-4 py-2 bg-[#56615a] hover:bg-[#434d46] text-white text-xs font-bold rounded-xl transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Upload Study Material</span>
+              </button>
+            )}
           </div>
         )}
       </main>

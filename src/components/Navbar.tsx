@@ -244,6 +244,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
           )}
+
+          {!activeClassroom && currentUser && (
+            <div className="flex items-center gap-2 ml-2">
+              <button
+                onClick={onOpenJoinClassroom}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#56615a] hover:bg-[#434d46] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Join a Cohort</span>
+              </button>
+              <button
+                onClick={onOpenCreateClassroom}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-[#F0EDED] text-[#1b1c1c] border border-[#E5E4E2] rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create a Cohort</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

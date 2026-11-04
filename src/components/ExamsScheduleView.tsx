@@ -54,24 +54,26 @@ export const ExamsScheduleView: React.FC<ExamsScheduleViewProps> = ({
   // Form states
   const [subjectName, setSubjectName] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
-  const [date, setDate] = useState('2026-09-25');
+  const [date, setDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().split('T')[0];
+  });
   const [time, setTime] = useState('10:00 AM - 01:00 PM');
   const [examType, setExamType] = useState('IAT 1');
   const [isCompletedInput, setIsCompletedInput] = useState(false);
 
   const isAdmin = currentUserRole === 'super_admin' || currentUserRole === 'admin';
 
-  // Simulated current date
-  const todayStr = '2026-09-05';
-
   const computeDays = (targetDate: string): number => {
     try {
-      const today = new Date(todayStr + 'T00:00:00');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
       const target = new Date(targetDate + 'T00:00:00');
       const diff = target.getTime() - today.getTime();
       return Math.ceil(diff / (1000 * 60 * 60 * 24));
     } catch {
-      return 10;
+      return 0;
     }
   };
 

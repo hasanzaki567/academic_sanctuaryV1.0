@@ -14,6 +14,7 @@ import { ProfileView } from './components/ProfileView';
 import { UploadMaterialModal } from './components/UploadMaterialModal';
 import { DocumentReaderModal } from './components/DocumentReaderModal';
 import { JoinClassroomModal } from './components/JoinClassroomModal';
+import { CohortChoiceModal } from './components/CohortChoiceModal';
 import { AuthModal } from './components/AuthModal';
 import { ChatView } from './components/chat/ChatView';
 import { supabase } from './lib/supabase';
@@ -55,6 +56,7 @@ export default function App() {
   const [uploadSubjectId, setUploadSubjectId] = useState<string | undefined>(undefined);
   const [uploadExamType, setUploadExamType] = useState<string | undefined>(undefined);
   const [isJoinOpen, setIsJoinOpen] = useState(false);
+  const [showCohortChoiceModal, setShowCohortChoiceModal] = useState(false);
   const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -305,33 +307,22 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
-  const handleAuthSuccess = (user: User, classroom: Classroom, message: string) => {
+  const handleAuthSuccess = (user: User, classroom: Classroom | null, message: string) => {
     setCurrentUser(user);
-    setActiveClassroom(classroom);
-    if (!classrooms.find((c) => c.id === classroom.id)) {
-      setClassrooms([classroom, ...classrooms]);
-    }
-    loadClassroomData(classroom.id);
-    showToast(message || `Welcome, ${user.name}! Connected to ${classroom.code}`);
-    setCurrentView('dashboard');
-  };
-
-  const handleQuickDemoLogin = async (email: string) => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: 'password123' }),
-      });
-      const data = await res.json();
-      if (res.ok && data.user) {
-        confetti({ particleCount: 50, spread: 60 });
-        handleAuthSuccess(data.user, data.classroom, data.message || `Welcome back, ${data.user.name}!`);
-      } else {
-        showToast(data.error || 'Failed to authenticate demo account.');
+    if (classroom) {
+      setActiveClassroom(classroom);
+      if (!classrooms.find((c) => c.id === classroom.id)) {
+        setClassrooms([classroom, ...classrooms]);
       }
-    } catch {
-      showToast('Error connecting to demo authentication server.');
+      loadClassroomData(classroom.id);
+      setShowCohortChoiceModal(false);
+      showToast(message || `Welcome, ${user.name}! Connected to ${classroom.code}`);
+      setCurrentView('dashboard');
+    } else {
+      setActiveClassroom(null);
+      setShowCohortChoiceModal(true);
+      showToast(message || `Welcome, ${user.name}! Choose a cohort option to get started.`);
+      setCurrentView('dashboard');
     }
   };
 
@@ -345,17 +336,47 @@ export default function App() {
     setCurrentView('landing');
   };
 
+  const getAuthHeaders = () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (currentUser) {
+      headers['x-user-id'] = currentUser.id;
+      headers['x-user-name'] = currentUser.name;
+      headers['x-user-role'] = currentUser.role;
+      headers['x-user-email'] = currentUser.email;
+    }
+    return headers;
+  };
+
   const handleCreateClassroom = async (formData: any) => {
     try {
       const res = await fetch('/api/classrooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...formData,
+          userId: currentUser?.id,
+          userName: currentUser?.name,
+          userEmail: currentUser?.email,
+        }),
       });
       if (res.ok) {
         const newCls = await res.json();
         setClassrooms([newCls, ...classrooms]);
         setActiveClassroom(newCls);
+        if (currentUser) {
+          setCurrentUser((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  role: 'super_admin',
+                  classroomId: newCls.id,
+                  classCode: newCls.code,
+                }
+              : null
+          );
+        }
         
         // Refresh subjects and data for new classroom
         loadClassroomData(newCls.id);
@@ -373,13 +394,24 @@ export default function App() {
     try {
       const res = await fetch('/api/classrooms/join', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ code }),
       });
       if (res.ok) {
         const result = await res.json();
         if (result.classroom) {
           setActiveClassroom(result.classroom);
+          if (currentUser) {
+            setCurrentUser((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    classroomId: result.classroom.id,
+                    classCode: result.classroom.code,
+                  }
+                : null
+            );
+          }
           if (!classrooms.find((c) => c.id === result.classroom.id)) {
             setClassrooms([result.classroom, ...classrooms]);
           }
@@ -398,12 +430,15 @@ export default function App() {
     try {
       const res = await fetch('/api/materials', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(materialData),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...materialData,
+          classroomId: activeClassroom?.id,
+        }),
       });
       if (res.ok) {
         const newMat = await res.json();
-        setMaterials([...materials, newMat]);
+        setMaterials([newMat, ...materials]);
         showToast(`"${newMat.title}" uploaded to library.`);
       }
     } catch (err) {
@@ -415,8 +450,13 @@ export default function App() {
     try {
       const res = await fetch('/api/announcements', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, isUrgent: true }),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          title,
+          description,
+          isUrgent: true,
+          classroomId: activeClassroom?.id,
+        }),
       });
       if (res.ok) {
         const newAnn = await res.json();
@@ -432,12 +472,15 @@ export default function App() {
     try {
       const res = await fetch('/api/exams', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(examData),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...examData,
+          classroomId: activeClassroom?.id,
+        }),
       });
       if (res.ok) {
         const newExam = await res.json();
-        setExams([...exams, newExam]);
+        setExams([newExam, ...exams]);
         showToast(`Exam schedule added for ${newExam.subjectName}.`);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -625,7 +668,6 @@ export default function App() {
             onOpenCreateClassroom={() => handleNavigate('create-classroom')}
             onOpenJoinClassroom={() => setIsJoinOpen(true)}
             onOpenAuth={handleOpenAuth}
-            onQuickDemoLogin={handleQuickDemoLogin}
           />
         )}
 
@@ -665,13 +707,13 @@ export default function App() {
                   onClick={() => setIsJoinOpen(true)}
                   className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
                 >
-                  Join Classroom
+                  Join a Cohort
                 </button>
                 <button
                   onClick={() => handleNavigate('create-classroom')}
                   className="px-6 py-3 bg-white border border-[#E5E4E2] text-[#1b1c1c] font-bold text-sm rounded-xl hover:bg-[#F0EDED] transition-all cursor-pointer"
                 >
-                  Create Classroom
+                  Create a Cohort
                 </button>
               </div>
             </div>
@@ -757,27 +799,93 @@ export default function App() {
           />
         )}
 
-        {currentView === 'members' && activeClassroom && (
-          <MembersDirectoryView
-            members={members}
-            classroom={activeClassroom}
-            currentUserRole={currentUser?.role || 'student'}
-            currentUserId={currentUser?.id}
-            onAddMember={handleAddMember}
-            onUpdateRole={handleUpdateMemberRole}
-            onRemoveMember={handleRemoveMember}
-            onBanMember={handleBanMember}
-            onBack={handleGoBack}
-            onStartChat={(memberId) => {
-              setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
-              setInitialChatTargetUserId(memberId);
-              setCurrentView('chat');
-            }}
-          />
+        {currentView === 'members' && (
+          activeClassroom ? (
+            <MembersDirectoryView
+              members={members}
+              classroom={activeClassroom}
+              currentUserRole={currentUser?.role || 'student'}
+              currentUserId={currentUser?.id}
+              onAddMember={handleAddMember}
+              onUpdateRole={handleUpdateMemberRole}
+              onRemoveMember={handleRemoveMember}
+              onBanMember={handleBanMember}
+              onBack={handleGoBack}
+              onStartChat={(memberId) => {
+                setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
+                setInitialChatTargetUserId(memberId);
+                setCurrentView('chat');
+              }}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <School className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">No Classroom Connected</h2>
+              <p className="text-sm text-[#56615a]">
+                You are not currently enrolled in any classroom cohort. Join an existing cohort with an access code or create a new classroom for your batch to view cohort members.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 pt-2 w-full justify-center">
+                <button
+                  onClick={() => setIsJoinOpen(true)}
+                  className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+                >
+                  Join a Cohort
+                </button>
+                <button
+                  onClick={() => handleNavigate('create-classroom')}
+                  className="px-6 py-3 bg-white border border-[#E5E4E2] text-[#1b1c1c] font-bold text-sm rounded-xl hover:bg-[#F0EDED] transition-all cursor-pointer"
+                >
+                  Create a Cohort
+                </button>
+              </div>
+            </div>
+          )
         )}
 
-        {currentView === 'chat' && activeClassroom && (
-          currentUser ? (
+        {currentView === 'chat' && (
+          !currentUser ? (
+            <div className="max-w-md mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <MessageSquare className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">Sign In Required</h2>
+              <p className="text-sm text-[#56615a]">
+                Please sign in with your institutional email and credentials to participate in your cohort chat.
+              </p>
+              <button
+                onClick={() => handleOpenAuth('login')}
+                className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+              >
+                Sign In with Institutional ID
+              </button>
+            </div>
+          ) : !activeClassroom ? (
+            <div className="max-w-xl mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
+                <School className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl font-black text-[#1b1c1c]">No Classroom Connected</h2>
+              <p className="text-sm text-[#56615a]">
+                Join or create a classroom cohort to access group discussions and direct messaging with your classmates.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 pt-2 w-full justify-center">
+                <button
+                  onClick={() => setIsJoinOpen(true)}
+                  className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+                >
+                  Join a Cohort
+                </button>
+                <button
+                  onClick={() => handleNavigate('create-classroom')}
+                  className="px-6 py-3 bg-white border border-[#E5E4E2] text-[#1b1c1c] font-bold text-sm rounded-xl hover:bg-[#F0EDED] transition-all cursor-pointer"
+                >
+                  Create a Cohort
+                </button>
+              </div>
+            </div>
+          ) : (
             <ChatView
               currentUser={currentUser}
               activeClassroomId={activeClassroom.id}
@@ -811,22 +919,6 @@ export default function App() {
                 );
               }}
             />
-          ) : (
-            <div className="max-w-md mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-[#d9e6dc] flex items-center justify-center text-[#56615a]">
-                <MessageSquare className="w-7 h-7" />
-              </div>
-              <h2 className="text-2xl font-black text-[#1b1c1c]">Sign In Required</h2>
-              <p className="text-sm text-[#56615a]">
-                Please sign in with your institutional email and credentials to participate in your cohort chat.
-              </p>
-              <button
-                onClick={() => handleOpenAuth('login')}
-                className="px-6 py-3 bg-[#56615a] hover:bg-[#434d46] text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
-              >
-                Sign In with Institutional ID
-              </button>
-            </div>
           )
         )}
 
@@ -906,6 +998,20 @@ export default function App() {
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
         onJoin={handleJoinClassroom}
+      />
+
+      <CohortChoiceModal
+        isOpen={showCohortChoiceModal}
+        onClose={() => setShowCohortChoiceModal(false)}
+        onCreateCohort={() => {
+          setShowCohortChoiceModal(false);
+          handleNavigate('create-classroom');
+        }}
+        onJoinCohort={() => {
+          setShowCohortChoiceModal(false);
+          setIsJoinOpen(true);
+        }}
+        userName={currentUser?.name}
       />
     </div>
   );
