@@ -18,12 +18,21 @@ import { CohortChoiceModal } from './components/CohortChoiceModal';
 import { AuthModal } from './components/AuthModal';
 import { ChatView } from './components/chat/ChatView';
 import { supabase } from './lib/supabase';
+import {
+  saveSessionUser,
+  getSessionUser,
+  updateSessionClassroomId,
+  clearSessionUser,
+} from './lib/auth-cookies';
 import { MessageSquare, UserCheck, School } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function App() {
+  // Synchronous session restore from cookies to prevent any logout flash on page refresh
+  const initialSession = typeof window !== 'undefined' ? getSessionUser() : { user: null, classroomId: null };
+
   // App navigation state: 'landing' | 'dashboard' | 'subject-detail' | 'create-classroom' | 'subjects' | 'notes' | 'exams' | 'members' | 'profile' | 'chat'
-  const [currentView, setCurrentView] = useState<string>('landing');
+  const [currentView, setCurrentView] = useState<string>(initialSession.user ? 'dashboard' : 'landing');
   const [initialChatTargetUserId, setInitialChatTargetUserId] = useState<string | null>(null);
   const [materialToForward, setMaterialToForward] = useState<Material | null>(null);
 
@@ -39,7 +48,7 @@ export default function App() {
   // Data states
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [activeClassroom, setActiveClassroom] = useState<Classroom | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(initialSession.user);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -200,48 +209,85 @@ export default function App() {
       };
 
       setCurrentUser(appUser);
+      saveSessionUser(appUser, matchedCls?.id);
       if (matchedCls) {
         setActiveClassroom(matchedCls);
         loadClassroomData(matchedCls.id);
       }
+      setCurrentView('dashboard');
     } catch (err) {
       console.error('Error loading Supabase user profile:', err);
     }
   };
 
-  // Fetch initial data and restore Supabase authentication session
+  // Fetch initial data and restore Supabase / Cookie authentication session
   useEffect(() => {
     let loadedClassrooms: Classroom[] = [];
 
     const initializeApp = async () => {
+      // 1. Fetch classrooms from server
       try {
         const clsRes = await fetch('/api/classrooms');
         if (clsRes.ok) {
           loadedClassrooms = await clsRes.json();
           setClassrooms(loadedClassrooms);
-          if (loadedClassrooms.length > 0) {
-            setActiveClassroom(loadedClassrooms[0]);
-            loadClassroomData(loadedClassrooms[0].id);
-          }
         }
       } catch (err) {
         console.error('Failed to load initial classrooms from server:', err);
       }
 
-      // Check URL for recovery link (password reset from email)
+      // 2. Check URL for recovery link (password reset from email)
       if (window.location.hash.includes('type=recovery') || window.location.hash.includes('reset-password')) {
         setAuthInitialMode('reset-password');
         setIsAuthOpen(true);
       }
 
-      // Restore active Supabase session
+      // 3. Verify server session via /api/auth/me using cookies
+      try {
+        const meRes = await fetch('/api/auth/me', {
+          headers: initialSession.user ? { 'x-user-id': initialSession.user.id } : {},
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData.authenticated && meData.user) {
+            setCurrentUser(meData.user);
+            const targetCls =
+              meData.classroom ||
+              loadedClassrooms.find((c) => c.id === meData.user.classroomId) ||
+              (initialSession.classroomId ? loadedClassrooms.find((c) => c.id === initialSession.classroomId) : null) ||
+              (loadedClassrooms.length > 0 ? loadedClassrooms[0] : null);
+
+            if (targetCls) {
+              setActiveClassroom(targetCls);
+              loadClassroomData(targetCls.id);
+              setShowCohortChoiceModal(false);
+            } else if (!meData.user.classroomId) {
+              setShowCohortChoiceModal(true);
+            }
+            saveSessionUser(meData.user, targetCls?.id);
+            setCurrentView('dashboard');
+          }
+        }
+      } catch (meErr) {
+        console.warn('Notice from /api/auth/me verification:', meErr);
+      }
+
+      // 4. Restore active Supabase session
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           await loadSupabaseUser(session.user, loadedClassrooms);
+          setCurrentView('dashboard');
         }
       } catch (err) {
         console.error('Error restoring Supabase session:', err);
+      }
+
+      // Default active classroom if none selected yet and classrooms exist
+      if (loadedClassrooms.length > 0 && !activeClassroom) {
+        const first = loadedClassrooms[0];
+        setActiveClassroom(first);
+        loadClassroomData(first.id);
       }
     };
 
@@ -254,8 +300,11 @@ export default function App() {
         setIsAuthOpen(true);
       } else if (event === 'SIGNED_IN' && session?.user) {
         await loadSupabaseUser(session.user, loadedClassrooms);
+        setCurrentView('dashboard');
       } else if (event === 'SIGNED_OUT') {
+        clearSessionUser();
         setCurrentUser(null);
+        setActiveClassroom(null);
       }
     });
 
@@ -309,6 +358,7 @@ export default function App() {
 
   const handleAuthSuccess = (user: User, classroom: Classroom | null, message: string) => {
     setCurrentUser(user);
+    saveSessionUser(user, classroom?.id);
     if (classroom) {
       setActiveClassroom(classroom);
       if (!classrooms.find((c) => c.id === classroom.id)) {
@@ -331,7 +381,9 @@ export default function App() {
       await supabase.auth.signOut();
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    clearSessionUser();
     setCurrentUser(null);
+    setActiveClassroom(null);
     showToast('Signed out successfully. Returned to sanctuary landing.');
     setCurrentView('landing');
   };
@@ -366,27 +418,30 @@ export default function App() {
         setClassrooms([newCls, ...classrooms]);
         setActiveClassroom(newCls);
         if (currentUser) {
-          setCurrentUser((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  role: 'super_admin',
-                  classroomId: newCls.id,
-                  classCode: newCls.code,
-                }
-              : null
-          );
+          const updatedUser: User = {
+            ...currentUser,
+            role: 'super_admin',
+            classroomId: newCls.id,
+            classCode: newCls.code,
+          };
+          setCurrentUser(updatedUser);
+          saveSessionUser(updatedUser, newCls.id);
         }
         
         // Refresh subjects and data for new classroom
         loadClassroomData(newCls.id);
+        setShowCohortChoiceModal(false);
 
         confetti({ particleCount: 50, spread: 60 });
         showToast(`Classroom "${newCls.name}" created! You are Super Admin.`);
         setCurrentView('dashboard');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Failed to create classroom.');
       }
     } catch (err) {
       console.error(err);
+      showToast('Error connecting to classroom server.');
     }
   };
 
@@ -397,32 +452,32 @@ export default function App() {
         headers: getAuthHeaders(),
         body: JSON.stringify({ code }),
       });
-      if (res.ok) {
-        const result = await res.json();
-        if (result.classroom) {
-          setActiveClassroom(result.classroom);
-          if (currentUser) {
-            setCurrentUser((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    classroomId: result.classroom.id,
-                    classCode: result.classroom.code,
-                  }
-                : null
-            );
-          }
-          if (!classrooms.find((c) => c.id === result.classroom.id)) {
-            setClassrooms([result.classroom, ...classrooms]);
-          }
-          loadClassroomData(result.classroom.id);
-          confetti({ particleCount: 50, spread: 60 });
-          showToast(`Successfully enrolled in "${result.classroom.name}"!`);
-          setCurrentView('dashboard');
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result.classroom) {
+        setActiveClassroom(result.classroom);
+        if (currentUser) {
+          const updatedUser: User = {
+            ...currentUser,
+            classroomId: result.classroom.id,
+            classCode: result.classroom.code,
+          };
+          setCurrentUser(updatedUser);
+          saveSessionUser(updatedUser, result.classroom.id);
         }
+        if (!classrooms.find((c) => c.id === result.classroom.id)) {
+          setClassrooms([result.classroom, ...classrooms]);
+        }
+        loadClassroomData(result.classroom.id);
+        setShowCohortChoiceModal(false);
+        confetti({ particleCount: 50, spread: 60 });
+        showToast(`Successfully enrolled in "${result.classroom.name}"!`);
+        setCurrentView('dashboard');
+      } else {
+        showToast(result.error || `Could not join cohort with code "${code}".`);
       }
     } catch (err) {
       console.error(err);
+      showToast('Error connecting to cohort server.');
     }
   };
 
@@ -654,6 +709,17 @@ export default function App() {
         onOpenJoinClassroom={() => setIsJoinOpen(true)}
         onSelectClassroom={(cls) => {
           setActiveClassroom(cls);
+          if (currentUser) {
+            const updatedUser = { ...currentUser, classroomId: cls.id, classCode: cls.code };
+            setCurrentUser(updatedUser);
+            saveSessionUser(updatedUser, cls.id);
+          }
+          updateSessionClassroomId(cls.id);
+          fetch('/api/auth/switch-cohort', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ classroomId: cls.id }),
+          }).catch(() => {});
           loadClassroomData(cls.id);
           showToast(`Switched to cohort: ${cls.name}`);
         }}
