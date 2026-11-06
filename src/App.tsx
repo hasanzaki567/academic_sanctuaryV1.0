@@ -231,6 +231,16 @@ export default function App() {
         if (clsRes.ok) {
           loadedClassrooms = await clsRes.json();
           setClassrooms(loadedClassrooms);
+
+          // If session already has an active classroom, immediately bind and load its resources
+          const targetClsId = initialSession.classroomId || initialSession.user?.classroomId;
+          if (targetClsId) {
+            const matched = loadedClassrooms.find((c) => c.id === targetClsId);
+            if (matched) {
+              setActiveClassroom(matched);
+              loadClassroomData(matched.id);
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to load initial classrooms from server:', err);

@@ -2,6 +2,31 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
+import {
+  dbFetchClassrooms,
+  dbSaveClassroom,
+  dbFindClassroomByCode,
+  dbFetchSubjects,
+  dbSaveSubject,
+  dbFetchMaterials,
+  dbSaveMaterial,
+  dbFetchAnnouncements,
+  dbSaveAnnouncement,
+  dbFetchExams,
+  dbSaveExam,
+  dbUpdateExam,
+  dbFetchMembers,
+  dbSaveMember,
+  dbUpdateMemberRole,
+  dbDeleteMember,
+  dbFetchChatGroups,
+  dbSaveChatGroup,
+  dbDeleteChatGroup,
+  dbFetchChatMessages,
+  dbSaveChatMessage,
+  dbUpdateChatMessage,
+  dbDeleteChatMessage,
+} from './src/lib/supabase-db';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -110,7 +135,7 @@ app.get('/api/auth/demo-users', (req, res) => {
 });
 
 // Current user profile & their single specific enrolled classroom (Restores via Cookies or Memory)
-app.get('/api/auth/me', (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   let userToReturn = currentUser;
 
   // Restore user from cookie or request headers on serverless cold starts
@@ -153,6 +178,19 @@ app.get('/api/auth/me', (req, res) => {
 
   if (!userClassroom && userToReturn.classroomId) {
     userClassroom = classrooms.find((c) => c.id === userToReturn.classroomId) || null;
+  }
+
+  // If not found in cache, check Supabase
+  if (!userClassroom && activeClsId) {
+    try {
+      const dbCls = await dbFetchClassrooms();
+      userClassroom = dbCls.find((c) => c.id === activeClsId) || null;
+      if (userClassroom && !classrooms.some((c) => c.id === userClassroom!.id)) {
+        classrooms.push(userClassroom);
+      }
+    } catch (e) {
+      console.warn('Classroom lookup in /api/auth/me notice:', e);
+    }
   }
 
   res.json({
@@ -610,19 +648,43 @@ app.post('/api/auth/verify-reset-otp', (req, res) => {
 });
 
 // Classrooms
-app.get('/api/classrooms', (req, res) => {
+app.get('/api/classrooms', async (req, res) => {
+  try {
+    const dbCls = await dbFetchClassrooms();
+    if (dbCls && dbCls.length > 0) {
+      const map = new Map<string, any>();
+      dbCls.forEach((c) => map.set(c.id, c));
+      classrooms.forEach((c) => {
+        if (!map.has(c.id)) map.set(c.id, c);
+      });
+      classrooms = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Classroom query warning:', err);
+  }
   res.json(classrooms);
 });
 
-app.get('/api/classrooms/:id', (req, res) => {
-  const cls = classrooms.find((c) => c.id === req.params.id);
+app.get('/api/classrooms/:id', async (req, res) => {
+  let cls = classrooms.find((c) => c.id === req.params.id);
+  if (!cls) {
+    try {
+      const dbCls = await dbFetchClassrooms();
+      cls = dbCls.find((c) => c.id === req.params.id);
+      if (cls && !classrooms.some((c) => c.id === cls!.id)) {
+        classrooms.push(cls);
+      }
+    } catch (err) {
+      console.warn('Classroom lookup warning:', err);
+    }
+  }
   if (!cls) {
     return res.status(404).json({ error: 'Cohort classroom not found.' });
   }
   res.json(cls);
 });
 
-app.post('/api/classrooms', (req, res) => {
+app.post('/api/classrooms', async (req, res) => {
   const {
     collegeName,
     location,
@@ -666,6 +728,7 @@ app.post('/api/classrooms', (req, res) => {
   };
 
   classrooms.unshift(newClassroom);
+  dbSaveClassroom(newClassroom).catch((e) => console.warn('Supabase save classroom warning:', e));
 
   // Link active user to this created classroom as super_admin
   activeUser.classroomId = newClassroom.id;
@@ -681,23 +744,25 @@ app.post('/api/classrooms', (req, res) => {
   }
 
   // Ensure active user is registered in the members directory as super_admin
+  const memRecord = {
+    id: activeUser.id,
+    name: activeUser.name,
+    email: activeUser.email,
+    avatar: activeUser.avatar,
+    role: 'super_admin' as const,
+    rollNumber: activeUser.rollNumber || 'ADM001',
+    joinedDate: 'Today',
+    classroomId: newClassroom.id,
+    department: activeUser.department,
+  };
   const memIndex = members.findIndex((m) => m.id === activeUser.id);
   if (memIndex >= 0) {
     members[memIndex].classroomId = newClassroom.id;
     members[memIndex].role = 'super_admin';
   } else {
-    members.push({
-      id: activeUser.id,
-      name: activeUser.name,
-      email: activeUser.email,
-      avatar: activeUser.avatar,
-      role: 'super_admin',
-      rollNumber: activeUser.rollNumber || 'ADM001',
-      joinedDate: 'Today',
-      classroomId: newClassroom.id,
-      department: activeUser.department,
-    });
+    members.push(memRecord);
   }
+  dbSaveMember(memRecord).catch((e) => console.warn('Supabase save member warning:', e));
 
   // Register selected subjects for this classroom
   if (Array.isArray(selectedSubjects) && selectedSubjects.length > 0) {
@@ -705,7 +770,7 @@ app.post('/api/classrooms', (req, res) => {
       const match = subName.match(/^(.*?)(?:\s*\((.*?)\))?$/);
       const name = match && match[1] ? match[1].trim() : subName;
       const code = match && match[2] ? match[2].trim() : `CS30${idx + 1}`;
-      subjects.push({
+      const newSub = {
         id: `sub-${Date.now()}-${idx}`,
         classroomId: newClassroom.id,
         code,
@@ -716,7 +781,9 @@ app.post('/api/classrooms', (req, res) => {
         materialsCount: 0,
         notesCount: 0,
         pyqsCount: 0,
-      });
+      };
+      subjects.push(newSub);
+      dbSaveSubject(newSub).catch((e) => console.warn('Supabase save subject warning:', e));
     });
   }
 
@@ -740,19 +807,35 @@ app.post('/api/classrooms', (req, res) => {
     role: 'admin',
     joinedAt: new Date().toISOString(),
   });
+  dbSaveChatGroup(generalChatGroup as any).catch((e) => console.warn('Supabase save chat group warning:', e));
 
   setAuthCookies(res, activeUser, newClassroom.id);
   res.status(201).json(newClassroom);
 });
 
-app.post('/api/classrooms/join', (req, res) => {
+app.post('/api/classrooms/join', async (req, res) => {
   const { code } = req.body;
   if (!code || !code.trim()) {
     return res.status(400).json({ error: 'Classroom access code is required.' });
   }
 
   const cleanCode = code.trim().toLowerCase();
-  const targetClassroom = classrooms.find((c) => c.code.toLowerCase() === cleanCode);
+  let targetClassroom = classrooms.find((c) => c.code.toLowerCase() === cleanCode);
+
+  // If not found in memory, query Supabase database directly by code
+  if (!targetClassroom) {
+    try {
+      const dbCls = await dbFindClassroomByCode(cleanCode);
+      if (dbCls) {
+        targetClassroom = dbCls;
+        if (!classrooms.some((c) => c.id === dbCls.id)) {
+          classrooms.unshift(dbCls);
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase find classroom warning:', err);
+    }
+  }
 
   // Strict check: if code is invalid or doesn't exist, return 404 (do not create phantom cohorts)
   if (!targetClassroom) {
@@ -771,22 +854,25 @@ app.post('/api/classrooms/join', (req, res) => {
 
   // Add member if not already added
   const alreadyMember = members.some((m) => m.id === activeUser.id && m.classroomId === targetClassroom.id);
+  const memberRecord = {
+    id: activeUser.id,
+    name: activeUser.name,
+    email: activeUser.email,
+    avatar: activeUser.avatar,
+    role: 'student' as const,
+    rollNumber: activeUser.rollNumber || `STU${members.length + 101}`,
+    joinedDate: 'Today',
+    classroomId: targetClassroom.id,
+    department: targetClassroom.department,
+  };
   if (!alreadyMember) {
-    members.push({
-      id: activeUser.id,
-      name: activeUser.name,
-      email: activeUser.email,
-      avatar: activeUser.avatar,
-      role: 'student',
-      rollNumber: activeUser.rollNumber || `STU${members.length + 101}`,
-      joinedDate: 'Today',
-      classroomId: targetClassroom.id,
-      department: targetClassroom.department,
-    });
+    members.push(memberRecord);
+    dbSaveMember(memberRecord).catch((e) => console.warn('Supabase save member warning:', e));
   }
 
   // Update member count accurately
   targetClassroom.memberCount = members.filter((m) => m.classroomId === targetClassroom.id).length;
+  dbSaveClassroom(targetClassroom).catch((e) => console.warn('Supabase update classroom member count warning:', e));
 
   // Ensure general chat group exists and user is enrolled in it
   let generalGroup = chatGroups.find((g) => g.classroomId === targetClassroom.id && !g.isDirect);
@@ -804,6 +890,7 @@ app.post('/api/classrooms/join', (req, res) => {
       bannedUserIds: [],
     };
     chatGroups.push(generalGroup);
+    dbSaveChatGroup(generalGroup as any).catch((e) => console.warn('Supabase save chat group warning:', e));
   }
 
   if (!chatGroupMembers.some((m) => m.groupId === generalGroup.id && m.userId === activeUser.id)) {
@@ -820,8 +907,22 @@ app.post('/api/classrooms/join', (req, res) => {
 });
 
 // Subjects
-app.get('/api/subjects', (req, res) => {
+app.get('/api/subjects', async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbSubs = await dbFetchSubjects(classroomId as string);
+    if (dbSubs && dbSubs.length > 0) {
+      const map = new Map<string, any>();
+      dbSubs.forEach((s) => map.set(s.id, s));
+      subjects.forEach((s) => {
+        if (!map.has(s.id)) map.set(s.id, s);
+      });
+      subjects = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Supabase fetch subjects warning:', err);
+  }
+
   // Strictly filter by classroomId (do not fall back to other classrooms' subjects)
   const list = classroomId
     ? subjects.filter((s) => s.classroomId === classroomId)
@@ -840,8 +941,19 @@ app.get('/api/subjects', (req, res) => {
   res.json(subjectsWithLiveCounts);
 });
 
-app.get('/api/subjects/:id', (req, res) => {
-  const subject = subjects.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+app.get('/api/subjects/:id', async (req, res) => {
+  let subject = subjects.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+  if (!subject) {
+    try {
+      const dbSubs = await dbFetchSubjects();
+      subject = dbSubs.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+      if (subject && !subjects.some((s) => s.id === subject!.id)) {
+        subjects.push(subject);
+      }
+    } catch (err) {
+      console.warn('Supabase find subject warning:', err);
+    }
+  }
   if (!subject) {
     return res.status(404).json({ error: 'Subject not found' });
   }
@@ -854,7 +966,7 @@ app.get('/api/subjects/:id', (req, res) => {
   });
 });
 
-app.post('/api/subjects', (req, res) => {
+app.post('/api/subjects', async (req, res) => {
   const { code, name, professor, description, classroomId = 'cls-1', creditHours = 4 } = req.body;
   const newSubject = {
     id: `sub-${Date.now()}`,
@@ -869,12 +981,27 @@ app.post('/api/subjects', (req, res) => {
     pyqsCount: 0,
   };
   subjects.push(newSubject);
+  dbSaveSubject(newSubject).catch((e) => console.warn('Supabase save subject warning:', e));
   res.status(201).json(newSubject);
 });
 
 // Materials
-app.get('/api/materials', (req, res) => {
+app.get('/api/materials', async (req, res) => {
   const { subjectId, type, search, classroomId } = req.query;
+  try {
+    const dbMats = await dbFetchMaterials(classroomId as string, subjectId as string);
+    if (dbMats && dbMats.length > 0) {
+      const map = new Map<string, any>();
+      dbMats.forEach((m) => map.set(m.id, m));
+      materials.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      materials = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Supabase fetch materials warning:', err);
+  }
+
   let result = [...materials];
 
   // Partition materials by cohort classroom
@@ -911,7 +1038,7 @@ app.get('/api/materials', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/materials', (req, res) => {
+app.post('/api/materials', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const {
     subjectId,
@@ -957,6 +1084,7 @@ app.post('/api/materials', (req, res) => {
         pyqsCount: 0,
       };
       subjects.push(subject);
+      dbSaveSubject(subject).catch((e) => console.warn('Supabase save dynamic subject warning:', e));
     }
   }
 
@@ -978,6 +1106,7 @@ app.post('/api/materials', (req, res) => {
         pyqsCount: 0,
       };
       subjects.push(subject);
+      dbSaveSubject(subject).catch((e) => console.warn('Supabase save default subject warning:', e));
     }
   }
 
@@ -1017,6 +1146,7 @@ app.post('/api/materials', (req, res) => {
   };
 
   materials.push(newMaterial);
+  dbSaveMaterial(newMaterial).catch((e) => console.warn('Supabase save material warning:', e));
 
   // Update counts
   if (type === 'notes') subject.notesCount += 1;
@@ -1027,15 +1157,28 @@ app.post('/api/materials', (req, res) => {
 });
 
 // Announcements
-app.get('/api/announcements', (req, res) => {
+app.get('/api/announcements', async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbAnns = await dbFetchAnnouncements(classroomId as string);
+    if (dbAnns && dbAnns.length > 0) {
+      const map = new Map<string, any>();
+      dbAnns.forEach((a) => map.set(a.id, a));
+      announcements.forEach((a) => {
+        if (!map.has(a.id)) map.set(a.id, a);
+      });
+      announcements = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Supabase fetch announcements warning:', err);
+  }
   if (classroomId) {
     return res.json(announcements.filter((a) => a.classroomId === classroomId));
   }
   res.json(announcements);
 });
 
-app.post('/api/announcements', (req, res) => {
+app.post('/api/announcements', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const { title, description, isUrgent = false, classroomId } = req.body;
   const newAnn = {
@@ -1048,19 +1191,33 @@ app.post('/api/announcements', (req, res) => {
     isUrgent: Boolean(isUrgent),
   };
   announcements.unshift(newAnn);
+  dbSaveAnnouncement(newAnn).catch((e) => console.warn('Supabase save announcement warning:', e));
   res.status(201).json(newAnn);
 });
 
 // Exams
-app.get('/api/exams', (req, res) => {
+app.get('/api/exams', async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbExs = await dbFetchExams(classroomId as string);
+    if (dbExs && dbExs.length > 0) {
+      const map = new Map<string, any>();
+      dbExs.forEach((e) => map.set(e.id, e));
+      exams.forEach((e) => {
+        if (!map.has(e.id)) map.set(e.id, e);
+      });
+      exams = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Supabase fetch exams warning:', err);
+  }
   if (classroomId) {
     return res.json(exams.filter((e) => e.classroomId === classroomId));
   }
   res.json(exams);
 });
 
-app.post('/api/exams', (req, res) => {
+app.post('/api/exams', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied. Only cohort administrators can publish examination schedules.' });
@@ -1092,10 +1249,11 @@ app.post('/api/exams', (req, res) => {
     isCompleted: Boolean(isCompleted || daysRemaining < 0),
   };
   exams.push(newExam);
+  dbSaveExam(newExam).catch((e) => console.warn('Supabase save exam warning:', e));
   res.status(201).json(newExam);
 });
 
-app.patch('/api/exams/:id', (req, res) => {
+app.patch('/api/exams/:id', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied. Only cohort administrators can modify examination schedules.' });
@@ -1112,12 +1270,31 @@ app.patch('/api/exams/:id', (req, res) => {
   if (typeof req.body.progressPercent === 'number') {
     exam.progressPercent = req.body.progressPercent;
   }
+  dbUpdateExam(req.params.id, {
+    isCompleted: exam.isCompleted,
+    progressPercent: exam.progressPercent,
+  }).catch((e) => console.warn('Supabase update exam warning:', e));
+
   res.json(exam);
 });
 
 // Members Management
-app.get('/api/members', (req, res) => {
+app.get('/api/members', async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbMems = await dbFetchMembers(classroomId as string);
+    if (dbMems && dbMems.length > 0) {
+      const map = new Map<string, any>();
+      dbMems.forEach((m) => map.set(m.id, m));
+      members.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      members = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn('Supabase fetch members warning:', err);
+  }
+
   if (classroomId) {
     const userIdsInClassroom = registeredUsers
       .filter((u) => u.classroomId === classroomId)
@@ -1131,7 +1308,7 @@ app.get('/api/members', (req, res) => {
 });
 
 // Add Member using Institutional Email
-app.post('/api/members', (req, res) => {
+app.post('/api/members', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({ error: 'Only cohort administrators can add members.' });
@@ -1168,7 +1345,7 @@ app.post('/api/members', (req, res) => {
     rollNumber && rollNumber.trim()
       ? rollNumber.trim().toUpperCase()
       : `ROLL-${Math.floor(100 + Math.random() * 900)}`;
-  const memberRole = role === 'admin' ? 'admin' : 'student';
+  const memberRole: 'admin' | 'student' = role === 'admin' ? 'admin' : 'student';
 
   const defaultAvatars = [
     'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
@@ -1204,17 +1381,19 @@ app.post('/api/members', (req, res) => {
     department: newUser.department,
   };
   members.push(newMemberRecord);
+  dbSaveMember(newMemberRecord).catch((e) => console.warn('Supabase save member warning:', e));
 
   const targetClassroom = classrooms.find((c) => c.id === targetClassroomId);
   if (targetClassroom) {
     targetClassroom.memberCount = (targetClassroom.memberCount || 0) + 1;
+    dbSaveClassroom(targetClassroom).catch((e) => console.warn('Supabase update classroom member count warning:', e));
   }
 
   res.status(201).json(newMemberRecord);
 });
 
 // Update Member Role (Grant/Revoke Admin Access)
-app.patch('/api/members/:id/role', (req, res) => {
+app.patch('/api/members/:id/role', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({ error: 'Only cohort administrators can manage member roles.' });
@@ -1242,6 +1421,7 @@ app.patch('/api/members/:id/role', (req, res) => {
   }
 
   member.role = role as any;
+  dbUpdateMemberRole(id, role).catch((e) => console.warn('Supabase update member role warning:', e));
 
   const regUser = registeredUsers.find((u) => u.id === id);
   if (regUser) {
@@ -1256,7 +1436,7 @@ app.patch('/api/members/:id/role', (req, res) => {
 });
 
 // Delete/Remove Member from Cohort
-app.delete('/api/members/:id', (req, res) => {
+app.delete('/api/members/:id', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({ error: 'Only cohort administrators can remove members.' });
@@ -1273,6 +1453,7 @@ app.delete('/api/members/:id', (req, res) => {
   }
 
   const removed = members.splice(index, 1)[0];
+  dbDeleteMember(id).catch((e) => console.warn('Supabase delete member warning:', e));
   const regIdx = registeredUsers.findIndex((u) => u.id === id);
   if (regIdx !== -1) {
     registeredUsers.splice(regIdx, 1);
@@ -1436,6 +1617,58 @@ interface ChatMessageRecord {
 let chatGroups: ChatGroupRecord[] = [];
 let chatGroupMembers: GroupMemberRecord[] = [];
 let chatMessages: ChatMessageRecord[] = [];
+
+// Initial Startup Sync with Supabase Database
+async function syncWithSupabase() {
+  try {
+    const [dbCls, dbSubs, dbMats, dbAnns, dbExs, dbMems, dbGrps] = await Promise.all([
+      dbFetchClassrooms(),
+      dbFetchSubjects(),
+      dbFetchMaterials(),
+      dbFetchAnnouncements(),
+      dbFetchExams(),
+      dbFetchMembers(),
+      dbFetchChatGroups(),
+    ]);
+
+    if (dbCls && dbCls.length > 0) {
+      classrooms = dbCls;
+    }
+    if (dbSubs && dbSubs.length > 0) {
+      subjects = dbSubs;
+    }
+    if (dbMats && dbMats.length > 0) {
+      materials = dbMats;
+    }
+    if (dbAnns && dbAnns.length > 0) {
+      announcements = dbAnns;
+    }
+    if (dbExs && dbExs.length > 0) {
+      exams = dbExs;
+    }
+    if (dbMems && dbMems.length > 0) {
+      members = dbMems;
+    }
+    if (dbGrps && dbGrps.length > 0) {
+      chatGroups = dbGrps as any;
+      dbGrps.forEach((g) => {
+        (g.memberIds || []).forEach((uid) => {
+          if (!chatGroupMembers.some((m) => m.groupId === g.id && m.userId === uid)) {
+            chatGroupMembers.push({
+              groupId: g.id,
+              userId: uid,
+              role: (g.adminIds || []).includes(uid) ? 'admin' : 'member',
+              joinedAt: new Date().toISOString(),
+            });
+          }
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('[Supabase Sync] Background startup sync notice:', err);
+  }
+}
+syncWithSupabase();
 
 // Helper to safely get active user or request fallback
 function getCurrentOrReqUser(req?: express.Request) {
@@ -1642,10 +1875,36 @@ function getMemberProfile(userId: string) {
 }
 
 // 1. Get all conversations (Groups & DMs) for current user
-app.get('/api/chat/groups', (req, res) => {
+app.get('/api/chat/groups', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const classroomId = (req.query.classroomId as string) || activeUser.classroomId || (classrooms[0]?.id || '');
   const userId = (req.query.userId as string) || activeUser.id;
+
+  try {
+    const dbGrps = await dbFetchChatGroups(classroomId);
+    if (dbGrps && dbGrps.length > 0) {
+      const map = new Map<string, any>();
+      dbGrps.forEach((g) => map.set(g.id, g));
+      chatGroups.forEach((g) => {
+        if (!map.has(g.id)) map.set(g.id, g);
+      });
+      chatGroups = Array.from(map.values()) as any;
+      dbGrps.forEach((g) => {
+        (g.memberIds || []).forEach((uid) => {
+          if (!chatGroupMembers.some((m) => m.groupId === g.id && m.userId === uid)) {
+            chatGroupMembers.push({
+              groupId: g.id,
+              userId: uid,
+              role: (g.adminIds || []).includes(uid) ? 'admin' : 'member',
+              joinedAt: new Date().toISOString(),
+            });
+          }
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Supabase fetch chat groups warning:', err);
+  }
 
   // Find all groups where userId is a member
   const userMemberships = chatGroupMembers.filter((m) => m.userId === userId);
@@ -1720,7 +1979,7 @@ app.get('/api/chat/groups', (req, res) => {
 });
 
 // 2. Create a new Group
-app.post('/api/chat/groups', (req, res) => {
+app.post('/api/chat/groups', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== 'super_admin' && activeUser.role !== 'admin') {
     return res.status(403).json({
@@ -1774,6 +2033,20 @@ app.post('/api/chat/groups', (req, res) => {
       joinedAt: new Date().toISOString(),
     });
   });
+
+  // Save to Supabase
+  dbSaveChatGroup({
+    id: newGroup.id,
+    classroomId: newGroup.classroomId,
+    name: newGroup.name,
+    avatar: newGroup.avatar,
+    description: newGroup.description,
+    isDirect: false,
+    createdBy: newGroup.createdBy,
+    adminIds: [activeUser.id],
+    memberIds: [activeUser.id, ...uniqueMemberIds],
+    createdAt: newGroup.createdAt,
+  } as any).catch((e) => console.warn('Supabase save chat group warning:', e));
 
   // Add system welcome message
   const welcomeMsg: ChatMessageRecord = {
@@ -2148,9 +2421,23 @@ app.patch('/api/chat/groups/:id/members/:userId/role', (req, res) => {
 });
 
 // 10. Get Messages for a Group
-app.get('/api/chat/groups/:id/messages', (req, res) => {
+app.get('/api/chat/groups/:id/messages', async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const groupId = req.params.id;
+
+  try {
+    const dbMsgs = await dbFetchChatMessages(groupId);
+    if (dbMsgs && dbMsgs.length > 0) {
+      const map = new Map<string, any>();
+      dbMsgs.forEach((m) => map.set(m.id, m));
+      chatMessages.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      chatMessages = Array.from(map.values()) as any;
+    }
+  } catch (err) {
+    console.warn('Supabase fetch chat messages warning:', err);
+  }
 
   // Verify caller is a member of this group
   const isMember = chatGroupMembers.some(
@@ -2212,6 +2499,7 @@ app.post('/api/chat/groups/:id/messages', (req, res) => {
   };
 
   chatMessages.push(newMsg);
+  dbSaveChatMessage(newMsg as any).catch((e) => console.warn('Supabase save chat message warning:', e));
 
   // Update group timestamp
   const group = chatGroups.find((g) => g.id === groupId);
@@ -2254,6 +2542,8 @@ app.post('/api/chat/messages/:id/react', (req, res) => {
     });
   }
 
+  dbUpdateChatMessage(msg.id, { reactions: msg.reactions }).catch((e) => console.warn('Supabase update reactions warning:', e));
+
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_reaction',
     groupId: msg.groupId,
@@ -2288,6 +2578,8 @@ app.post('/api/chat/messages/:id/pin', (req, res) => {
     }
   }
 
+  dbUpdateChatMessage(msg.id, { isPinned: msg.isPinned }).catch((e) => console.warn('Supabase update pin warning:', e));
+
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_pinned',
     groupId: msg.groupId,
@@ -2316,6 +2608,8 @@ app.post('/api/chat/messages/:id/star', (req, res) => {
     isStarred = true;
   }
   msg.isStarred = isStarred;
+
+  dbUpdateChatMessage(msg.id, { isStarred: msg.isStarred, starredBy: msg.starredBy }).catch((e) => console.warn('Supabase update star warning:', e));
 
   res.json({ success: true, isStarred, messageId: msg.id });
 });
@@ -2536,6 +2830,11 @@ app.delete('/api/chat/messages/:id', (req, res) => {
   msg.fileUrl = undefined;
   msg.forwardedMaterial = undefined;
 
+  dbUpdateChatMessage(msg.id, {
+    isDeleted: true,
+    content: 'This message was deleted',
+  }).catch((e) => console.warn('Supabase update delete message warning:', e));
+
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_deleted',
     groupId: msg.groupId,
@@ -2695,6 +2994,7 @@ async function startServer() {
 }
 
 export { app, server };
+export * from './src/lib/supabase-db';
 export default app;
 
 if (!process.env.VERCEL) {
