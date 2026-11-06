@@ -32,6 +32,46 @@ var materials = [];
 var announcements = [];
 var exams = [];
 var members = [];
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+  if (rc) {
+    rc.split(";").forEach((cookie) => {
+      const parts = cookie.split("=");
+      const key = parts.shift()?.trim();
+      if (key) {
+        try {
+          list[key] = decodeURIComponent(parts.join("="));
+        } catch (e) {
+          list[key] = parts.join("=");
+        }
+      }
+    });
+  }
+  return list;
+}
+function setAuthCookies(res, user, classroomId) {
+  const sanitizedUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    role: user.role,
+    department: user.department,
+    rollNumber: user.rollNumber,
+    classroomId: classroomId || user.classroomId
+  };
+  const maxAge = 30 * 24 * 60 * 60;
+  const cookieUser = `as_auth_user=${encodeURIComponent(JSON.stringify(sanitizedUser))}; Path=/; Max-Age=${maxAge}; SameSite=Lax`;
+  const cookieClassroom = `as_active_classroom_id=${encodeURIComponent(sanitizedUser.classroomId || "")}; Path=/; Max-Age=${maxAge}; SameSite=Lax`;
+  res.setHeader("Set-Cookie", [cookieUser, cookieClassroom]);
+}
+function clearAuthCookies(res) {
+  res.setHeader("Set-Cookie", [
+    "as_auth_user=; Path=/; Max-Age=0; SameSite=Lax",
+    "as_active_classroom_id=; Path=/; Max-Age=0; SameSite=Lax"
+  ]);
+}
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
 });
@@ -54,21 +94,68 @@ app.get("/api/auth/demo-users", (req, res) => {
   res.json(sanitized);
 });
 app.get("/api/auth/me", (req, res) => {
-  if (!currentUser) {
+  let userToReturn = currentUser;
+  const cookies = parseCookies(req);
+  if (!userToReturn && cookies.as_auth_user) {
+    try {
+      const parsed = JSON.parse(cookies.as_auth_user);
+      if (parsed && parsed.id) {
+        let registered = registeredUsers.find((u) => u.id === parsed.id || u.email === parsed.email);
+        if (!registered) {
+          registeredUsers.push(parsed);
+          registered = parsed;
+        }
+        currentUser = registered;
+        userToReturn = registered;
+      }
+    } catch (e) {
+      console.warn("Error parsing auth cookie in /api/auth/me:", e);
+    }
+  }
+  if (!userToReturn && req.headers["x-user-id"]) {
+    const headerId = req.headers["x-user-id"];
+    const found = registeredUsers.find((u) => u.id === headerId) || members.find((m) => m.id === headerId);
+    if (found) {
+      currentUser = found;
+      userToReturn = found;
+    }
+  }
+  if (!userToReturn) {
     return res.json({ authenticated: false, user: null, classroom: null });
   }
-  const userClassroom = currentUser.classroomId ? classrooms.find((c) => c.id === currentUser.classroomId) || null : null;
+  const activeClsId = cookies.as_active_classroom_id || userToReturn.classroomId;
+  let userClassroom = activeClsId ? classrooms.find((c) => c.id === activeClsId) || null : null;
+  if (!userClassroom && userToReturn.classroomId) {
+    userClassroom = classrooms.find((c) => c.id === userToReturn.classroomId) || null;
+  }
   res.json({
     authenticated: true,
-    user: currentUser,
+    user: userToReturn,
     classroom: userClassroom
   });
 });
 app.get("/api/user", (req, res) => {
-  if (!currentUser) {
+  const activeUser = getCurrentOrReqUser(req);
+  if (!activeUser || activeUser.id === "user-guest") {
     return res.status(401).json({ error: "Not authenticated" });
   }
-  res.json(currentUser);
+  res.json(activeUser);
+});
+app.post("/api/auth/switch-cohort", (req, res) => {
+  const { classroomId } = req.body;
+  const targetClassroom = classrooms.find((c) => c.id === classroomId);
+  if (!targetClassroom) {
+    return res.status(404).json({ error: "Cohort not found." });
+  }
+  const activeUser = getCurrentOrReqUser(req);
+  activeUser.classroomId = classroomId;
+  if (currentUser && currentUser.id === activeUser.id) {
+    currentUser.classroomId = classroomId;
+  }
+  const reg = registeredUsers.find((u) => u.id === activeUser.id);
+  if (reg) reg.classroomId = classroomId;
+  setAuthCookies(res, activeUser, classroomId);
+  res.json({ success: true, classroom: targetClassroom, user: activeUser });
 });
 app.post("/api/auth/login", (req, res) => {
   const { email, password } = req.body;
@@ -91,6 +178,7 @@ app.post("/api/auth/login", (req, res) => {
   }
   currentUser = foundUser;
   const userClassroom = foundUser.classroomId ? classrooms.find((c) => c.id === foundUser.classroomId) || null : null;
+  setAuthCookies(res, foundUser, userClassroom?.id);
   res.json({
     success: true,
     user: foundUser,
@@ -284,6 +372,7 @@ app.post("/api/auth/verify-signup-otp", (req, res) => {
   }
   const { newUser, assignedClassroom } = registerUserInternal(record.userData);
   signupOtpStore.delete(cleanEmail);
+  setAuthCookies(res, newUser, assignedClassroom?.id);
   res.status(201).json({
     success: true,
     user: newUser,
@@ -312,6 +401,7 @@ app.post("/api/auth/signup", (req, res) => {
     return res.status(400).json({ error: "An account with this institutional email already exists. Please log in with your institutional credentials." });
   }
   const { newUser, assignedClassroom } = registerUserInternal(req.body);
+  setAuthCookies(res, newUser, assignedClassroom?.id);
   res.status(201).json({
     success: true,
     user: newUser,
@@ -327,9 +417,12 @@ app.post("/api/auth/switch-user", (req, res) => {
   }
   currentUser = user;
   const userClassroom = classrooms.find((c) => c.id === user.classroomId) || classrooms[0];
+  setAuthCookies(res, user, userClassroom?.id);
   res.json({ success: true, user, classroom: userClassroom });
 });
 app.post("/api/auth/logout", (req, res) => {
+  currentUser = null;
+  clearAuthCookies(res);
   res.json({ success: true, message: "Logged out successfully" });
 });
 var otpStore = /* @__PURE__ */ new Map();
@@ -395,7 +488,10 @@ app.get("/api/classrooms", (req, res) => {
   res.json(classrooms);
 });
 app.get("/api/classrooms/:id", (req, res) => {
-  const cls = classrooms.find((c) => c.id === req.params.id) || classrooms[0];
+  const cls = classrooms.find((c) => c.id === req.params.id);
+  if (!cls) {
+    return res.status(404).json({ error: "Cohort classroom not found." });
+  }
   res.json(cls);
 });
 app.post("/api/classrooms", (req, res) => {
@@ -410,11 +506,17 @@ app.post("/api/classrooms", (req, res) => {
     semester = "Semester 5",
     selectedSubjects = []
   } = req.body;
-  const newCode = `${course ? course.substring(0, 3).toUpperCase() : "CLS"}${batchYear.slice(-2)}${section ? section.slice(-1) : "A"}`.replace(/[^A-Z0-9]/g, "") || "SANCT26";
+  const rawBase = `${course ? course.substring(0, 3).toUpperCase() : "CLS"}${batchYear.slice(-2)}${section ? section.slice(-1) : "A"}`.replace(/[^A-Z0-9]/g, "") || "SANCT26";
+  let uniqueCode = rawBase;
+  let counter = 2;
+  while (classrooms.some((c) => c.code.toLowerCase() === uniqueCode.toLowerCase())) {
+    uniqueCode = `${rawBase}-${counter}`;
+    counter++;
+  }
   const activeUser = getCurrentOrReqUser(req);
   const newClassroom = {
     id: `cls-${Date.now()}`,
-    code: newCode,
+    code: uniqueCode,
     name: `${course || "Classroom"} ${batchYear} - ${section}`,
     collegeName: collegeName || "Academic University",
     location: location || "Campus",
@@ -494,43 +596,30 @@ app.post("/api/classrooms", (req, res) => {
     role: "admin",
     joinedAt: (/* @__PURE__ */ new Date()).toISOString()
   });
+  setAuthCookies(res, activeUser, newClassroom.id);
   res.status(201).json(newClassroom);
 });
 app.post("/api/classrooms/join", (req, res) => {
   const { code } = req.body;
-  if (!code) {
-    return res.status(400).json({ error: "Classroom code is required" });
+  if (!code || !code.trim()) {
+    return res.status(400).json({ error: "Classroom access code is required." });
+  }
+  const cleanCode = code.trim().toLowerCase();
+  const targetClassroom = classrooms.find((c) => c.code.toLowerCase() === cleanCode);
+  if (!targetClassroom) {
+    return res.status(404).json({
+      error: `Invalid classroom code "${code.trim().toUpperCase()}". No cohort found with this code. Please verify the code with your instructor or peers.`
+    });
   }
   const activeUser = getCurrentOrReqUser(req);
-  let targetClassroom = classrooms.find((c) => c.code.toLowerCase() === code.trim().toLowerCase());
-  if (targetClassroom) {
-    targetClassroom.memberCount += 1;
-  } else {
-    targetClassroom = {
-      id: `cls-${Date.now()}`,
-      code: code.trim().toUpperCase(),
-      name: `Classroom ${code.trim().toUpperCase()}`,
-      collegeName: "Partner University",
-      location: "Campus",
-      department: "Computer Science & Engineering",
-      course: "B.Tech CSE",
-      degreeLevel: "undergraduate",
-      batchYear: "2026",
-      section: "Section B",
-      semester: "Semester 5",
-      superAdminId: activeUser.id,
-      memberCount: 1,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
-    };
-    classrooms.unshift(targetClassroom);
-  }
   activeUser.classroomId = targetClassroom.id;
   if (currentUser) {
     currentUser.classroomId = targetClassroom.id;
   }
   const reg = registeredUsers.find((u) => u.id === activeUser.id);
   if (reg) reg.classroomId = targetClassroom.id;
-  if (!members.some((m) => m.id === activeUser.id && m.classroomId === targetClassroom.id)) {
+  const alreadyMember = members.some((m) => m.id === activeUser.id && m.classroomId === targetClassroom.id);
+  if (!alreadyMember) {
     members.push({
       id: activeUser.id,
       name: activeUser.name,
@@ -543,6 +632,7 @@ app.post("/api/classrooms/join", (req, res) => {
       department: targetClassroom.department
     });
   }
+  targetClassroom.memberCount = members.filter((m) => m.classroomId === targetClassroom.id).length;
   let generalGroup = chatGroups.find((g) => g.classroomId === targetClassroom.id && !g.isDirect);
   if (!generalGroup) {
     generalGroup = {
@@ -567,13 +657,13 @@ app.post("/api/classrooms/join", (req, res) => {
       joinedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
   }
+  setAuthCookies(res, activeUser, targetClassroom.id);
   res.json({ success: true, classroom: targetClassroom });
 });
 app.get("/api/subjects", (req, res) => {
   const { classroomId } = req.query;
   const list = classroomId ? subjects.filter((s) => s.classroomId === classroomId) : subjects;
-  const targetList = list.length > 0 ? list : subjects;
-  const subjectsWithLiveCounts = targetList.map((s) => {
+  const subjectsWithLiveCounts = list.map((s) => {
     const subMats = materials.filter((m) => m.subjectId === s.id || m.subjectCode?.toLowerCase() === s.code?.toLowerCase());
     return {
       ...s,
@@ -615,8 +705,16 @@ app.post("/api/subjects", (req, res) => {
   res.status(201).json(newSubject);
 });
 app.get("/api/materials", (req, res) => {
-  const { subjectId, type, search } = req.query;
+  const { subjectId, type, search, classroomId } = req.query;
   let result = [...materials];
+  if (classroomId) {
+    const classroomSubjectIds = new Set(
+      subjects.filter((s) => s.classroomId === classroomId).map((s) => s.id)
+    );
+    result = result.filter(
+      (m) => m.classroomId === classroomId || classroomSubjectIds.has(m.subjectId)
+    );
+  }
   if (subjectId) {
     result = result.filter((m) => m.subjectId === subjectId);
   }
@@ -626,7 +724,7 @@ app.get("/api/materials", (req, res) => {
   if (search) {
     const q = String(search).toLowerCase();
     result = result.filter(
-      (m) => m.title.toLowerCase().includes(q) || m.description && m.description.toLowerCase().includes(q) || m.tags && m.tags.some((t) => t.toLowerCase().includes(q))
+      (m) => m.title.toLowerCase().includes(q) || m.description && m.description.toLowerCase().includes(q) || m.subjectName && m.subjectName.toLowerCase().includes(q) || m.subjectCode && m.subjectCode.toLowerCase().includes(q) || m.tags && m.tags.some((t) => t.toLowerCase().includes(q))
     );
   }
   result.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
@@ -647,19 +745,23 @@ app.post("/api/materials", (req, res) => {
     tags = [],
     unit = "General",
     contentSnippet = "",
-    recommendedExam = ""
+    recommendedExam = "",
+    classroomId
   } = req.body;
   let subject = subjects.find((s) => s.id === subjectId);
+  const targetClassroomId = classroomId || activeUser.classroomId || classrooms[0]?.id || "";
   if ((!subject || subjectId === "custom") && (subjectName || subjectCode)) {
     const sName = (subjectName || "General Studies").trim();
     const sCode = (subjectCode || "GEN101").trim().toUpperCase();
-    const existing = subjects.find((s) => s.code.toLowerCase() === sCode.toLowerCase());
+    const existing = subjects.find(
+      (s) => s.code.toLowerCase() === sCode.toLowerCase() && (!targetClassroomId || s.classroomId === targetClassroomId)
+    );
     if (existing) {
       subject = existing;
     } else {
       subject = {
         id: `sub-${Date.now()}`,
-        classroomId: activeUser.classroomId || classrooms[0]?.id || "",
+        classroomId: targetClassroomId,
         code: sCode,
         name: sName,
         professor: professor ? professor.trim() : "Faculty Instructor",
@@ -673,12 +775,13 @@ app.post("/api/materials", (req, res) => {
     }
   }
   if (!subject) {
-    if (subjects.length > 0) {
-      subject = subjects[0];
+    const classroomSubjects = subjects.filter((s) => s.classroomId === targetClassroomId);
+    if (classroomSubjects.length > 0) {
+      subject = classroomSubjects[0];
     } else {
       subject = {
         id: `sub-${Date.now()}`,
-        classroomId: activeUser.classroomId || classrooms[0]?.id || "",
+        classroomId: targetClassroomId,
         code: subjectCode || "ACAD101",
         name: subjectName || "General Academic Course",
         professor: professor ? professor.trim() : "Faculty Coordinator",
@@ -699,6 +802,7 @@ app.post("/api/materials", (req, res) => {
   });
   const newMaterial = {
     id: `mat-${now}`,
+    classroomId: targetClassroomId,
     subjectId: subject.id,
     subjectCode: subject.code,
     subjectName: subject.name,
@@ -1010,6 +1114,21 @@ function getCurrentOrReqUser(req) {
       rollNumber: "STU001",
       classroomId: classrooms[0]?.id || ""
     };
+  }
+  if (req) {
+    const cookies = parseCookies(req);
+    if (cookies.as_auth_user) {
+      try {
+        const cookieUser = JSON.parse(cookies.as_auth_user);
+        if (cookieUser && cookieUser.id) {
+          const existing = registeredUsers.find((u) => u.id === cookieUser.id);
+          if (existing) return existing;
+          registeredUsers.push(cookieUser);
+          return cookieUser;
+        }
+      } catch (e) {
+      }
+    }
   }
   if (currentUser) return currentUser;
   return {
