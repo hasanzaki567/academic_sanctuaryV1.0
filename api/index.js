@@ -728,7 +728,7 @@ app.get("/api/auth/demo-users", (req, res) => {
   });
   res.json(sanitized);
 });
-app.get("/api/auth/me", (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   let userToReturn = currentUser;
   const cookies = parseCookies(req);
   if (!userToReturn && cookies.as_auth_user) {
@@ -762,6 +762,17 @@ app.get("/api/auth/me", (req, res) => {
   let userClassroom = activeClsId ? classrooms.find((c) => c.id === activeClsId) || null : null;
   if (!userClassroom && userToReturn.classroomId) {
     userClassroom = classrooms.find((c) => c.id === userToReturn.classroomId) || null;
+  }
+  if (!userClassroom && activeClsId) {
+    try {
+      const dbCls = await dbFetchClassrooms();
+      userClassroom = dbCls.find((c) => c.id === activeClsId) || null;
+      if (userClassroom && !classrooms.some((c) => c.id === userClassroom.id)) {
+        classrooms.push(userClassroom);
+      }
+    } catch (e) {
+      console.warn("Classroom lookup in /api/auth/me notice:", e);
+    }
   }
   res.json({
     authenticated: true,

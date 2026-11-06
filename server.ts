@@ -135,7 +135,7 @@ app.get('/api/auth/demo-users', (req, res) => {
 });
 
 // Current user profile & their single specific enrolled classroom (Restores via Cookies or Memory)
-app.get('/api/auth/me', (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   let userToReturn = currentUser;
 
   // Restore user from cookie or request headers on serverless cold starts
@@ -178,6 +178,19 @@ app.get('/api/auth/me', (req, res) => {
 
   if (!userClassroom && userToReturn.classroomId) {
     userClassroom = classrooms.find((c) => c.id === userToReturn.classroomId) || null;
+  }
+
+  // If not found in cache, check Supabase
+  if (!userClassroom && activeClsId) {
+    try {
+      const dbCls = await dbFetchClassrooms();
+      userClassroom = dbCls.find((c) => c.id === activeClsId) || null;
+      if (userClassroom && !classrooms.some((c) => c.id === userClassroom!.id)) {
+        classrooms.push(userClassroom);
+      }
+    } catch (e) {
+      console.warn('Classroom lookup in /api/auth/me notice:', e);
+    }
   }
 
   res.json({
