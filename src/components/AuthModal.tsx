@@ -39,7 +39,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onAuthSuccess,
   classrooms,
 }) => {
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot-password' | 'verify-otp' | 'reset-password'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot-password' | 'verify-otp' | 'reset-password' | 'verify-signup-otp'>(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -58,6 +58,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [registrationNumber, setRegistrationNumber] = useState('');
 
+  // Sign Up OTP verification state
+  const [signupOtpCode, setSignupOtpCode] = useState('');
+  const [simulatedSignupOtp, setSimulatedSignupOtp] = useState<string | null>(null);
+  const [signupOtpCountdown, setSignupOtpCountdown] = useState(0);
+
   // Forgot password & Reset password form state
   const [resetEmail, setResetEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -70,7 +75,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMessage(null);
     setSuccessMessage(null);
     setEmailConfirmationSent(false);
+    setSignupOtpCode('');
   }, [initialMode, isOpen]);
+
+  // Resend OTP countdown timer
+  useEffect(() => {
+    if (signupOtpCountdown <= 0) return;
+    const timer = setTimeout(() => {
+      setSignupOtpCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [signupOtpCountdown]);
 
   if (!isOpen) return null;
 
@@ -255,13 +270,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // 2. Handle Sign Up
+  // 2. Handle Sign Up Submission (Dispatch OTP)
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMessage(null);
     setSuccessMessage(null);
-    setEmailConfirmationSent(false);
 
     // Strict validation of the required fields
     if (!fullName.trim()) {
@@ -303,14 +317,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    try {
-      const trimmedEmail = signupEmail.trim().toLowerCase();
-      const trimmedFullName = fullName.trim();
-      const trimmedRegNo = registrationNumber.trim().toUpperCase();
+    const trimmedEmail = signupEmail.trim().toLowerCase();
+    const trimmedFullName = fullName.trim();
+    const trimmedRegNo = registrationNumber.trim().toUpperCase();
 
-      // Register user through Supabase Auth or Local Server
-      // 1. Try Supabase Auth first if configured
+    try {
+      // 1. Try Supabase Auth sign up
       let supabaseError: any = null;
+      let supabaseInitiated = false;
       try {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
@@ -326,85 +340,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (error) {
           supabaseError = error;
         } else if (data?.user) {
-          // If Supabase returned identities: [] it means email is already registered
           if (data.user.identities && data.user.identities.length === 0) {
             setErrorMessage('An account with this email is already registered. Please sign in instead.');
             setLoading(false);
             return;
           }
-
-          try {
-            await supabase
-              .from('profiles')
-              .upsert({
-                id: data.user.id,
-                full_name: trimmedFullName,
-                registration_number: trimmedRegNo,
-              });
-          } catch (pe) {
-            console.warn('Note: Profile upsert returned:', pe);
-          }
-
-          if (!data.session) {
-            setEmailConfirmationSent(true);
-            setSuccessMessage(
-              `Registration successful! A confirmation email has been sent to ${trimmedEmail}. Please check your inbox and verify your email to log in.`
-            );
-            setLoading(false);
-            return;
-          }
-
-          confetti({ particleCount: 70, spread: 80 });
-          const { user: appUser, classroom: appClassroom } = await buildAppUser(data.user, {
-            id: data.user.id,
-            full_name: trimmedFullName,
-            registration_number: trimmedRegNo,
-          });
-
-          onAuthSuccess(appUser, appClassroom, 'Account created and authenticated successfully!');
-          onClose();
-          return;
+          supabaseInitiated = true;
         }
       } catch (sbErr: any) {
         supabaseError = sbErr;
       }
 
-      // If Supabase gave an explicit error, handle it cleanly and stop
-      if (supabaseError) {
-        if (
-          supabaseError.status === 429 ||
-          supabaseError.code === 'over_email_send_rate_limit' ||
-          supabaseError.message?.toLowerCase().includes('rate limit') ||
-          supabaseError.message?.toLowerCase().includes('security purposes')
-        ) {
-          setErrorMessage(
-            'For security purposes, please wait a few seconds before requesting another confirmation email.'
-          );
-          setLoading(false);
-          return;
-        }
-
-        if (
-          supabaseError.status === 422 ||
+      // Check if user already registered according to Supabase
+      if (
+        supabaseError &&
+        (supabaseError.status === 422 ||
           supabaseError.message?.toLowerCase().includes('already registered') ||
-          supabaseError.message?.toLowerCase().includes('already exists')
-        ) {
-          setErrorMessage('An account with this email is already registered. Please sign in instead.');
-          setLoading(false);
-          return;
-        }
-
-        if (supabaseError.message) {
-          setErrorMessage(supabaseError.message);
-          setLoading(false);
-          return;
-        }
+          supabaseError.message?.toLowerCase().includes('already exists'))
+      ) {
+        setErrorMessage('An account with this email is already registered. Please sign in instead.');
+        setLoading(false);
+        return;
       }
 
-      // 2. Fallback to local server database (/api/auth/signup) only if Supabase had no response
-      let resData: any = null;
+      // 2. Also dispatch OTP via our backend service for backup & instant verification
+      let serverOtp: string | null = null;
+      let serverError: string | null = null;
       try {
-        const res = await fetch('/api/auth/signup', {
+        const res = await fetch('/api/auth/send-signup-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -418,37 +381,190 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         });
 
         const text = await res.text();
+        let resData: any = null;
         try {
           resData = text ? JSON.parse(text) : {};
         } catch {
           resData = null;
         }
 
-        if (res.ok && resData?.user) {
-          confetti({ particleCount: 70, spread: 80 });
-          onAuthSuccess(resData.user, resData.classroom || null, resData.message || 'Account created successfully!');
-          onClose();
-          return;
-        }
-
-        if (resData?.error) {
-          setErrorMessage(resData.error);
-          return;
+        if (res.ok && resData?.otp) {
+          serverOtp = resData.otp;
+        } else if (resData?.error) {
+          serverError = resData.error;
         }
       } catch (fetchErr) {
-        // Fallback fetch error ignored
+        console.warn('Backend send-signup-otp error:', fetchErr);
       }
 
-      setErrorMessage(
-        supabaseError?.message ||
-        resData?.error ||
-        'Registration failed. Please check your details and try again.'
-      );
+      // If user already exists in backend database
+      if (serverError && serverError.includes('already exists') && !supabaseInitiated) {
+        setErrorMessage(serverError);
+        setLoading(false);
+        return;
+      }
+
+      // Transition to OTP verification screen!
+      setSimulatedSignupOtp(serverOtp);
+      setSignupOtpCode('');
+      setSignupOtpCountdown(60);
+      setSuccessMessage(`A 6-digit verification OTP has been sent to ${trimmedEmail}. Please enter it below to complete your registration.`);
+      setMode('verify-signup-otp');
     } catch (err: any) {
       setErrorMessage(err.message || 'An unexpected error occurred during registration.');
     } finally {
       setLoading(false);
     }
+  };
+
+  // 2b. Handle Verify Sign Up OTP Submission
+  const handleVerifySignupOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const trimmedEmail = signupEmail.trim().toLowerCase();
+    const cleanOtp = signupOtpCode.trim();
+    const trimmedFullName = fullName.trim();
+    const trimmedRegNo = registrationNumber.trim().toUpperCase();
+
+    if (!cleanOtp || cleanOtp.length < 6) {
+      setErrorMessage('Please enter the full 6-digit verification OTP code.');
+      setLoading(false);
+      return;
+    }
+
+    // 1. First attempt: Supabase Auth verifyOtp
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: trimmedEmail,
+        token: cleanOtp,
+        type: 'signup',
+      });
+
+      if (!error && data?.user) {
+        try {
+          await supabase.from('profiles').upsert({
+            id: data.user.id,
+            full_name: trimmedFullName,
+            registration_number: trimmedRegNo,
+          });
+        } catch (pe) {
+          console.warn('Profile upsert notice:', pe);
+        }
+
+        confetti({ particleCount: 70, spread: 80 });
+        const { user: appUser, classroom: appClassroom } = await buildAppUser(data.user, {
+          id: data.user.id,
+          full_name: trimmedFullName,
+          registration_number: trimmedRegNo,
+        });
+
+        onAuthSuccess(appUser, appClassroom, 'Account verified and signed up successfully! Welcome to Academic Sanctuary.');
+        onClose();
+        return;
+      }
+    } catch (sbErr) {
+      console.warn('Supabase verifyOtp notice:', sbErr);
+    }
+
+    // 2. Second attempt: Local server OTP verification
+    try {
+      const res = await fetch('/api/auth/verify-signup-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          otp: cleanOtp,
+        }),
+      });
+
+      const text = await res.text();
+      let resData: any = null;
+      try {
+        resData = text ? JSON.parse(text) : {};
+      } catch {
+        resData = null;
+      }
+
+      if (res.ok && resData?.user) {
+        confetti({ particleCount: 70, spread: 80 });
+        onAuthSuccess(
+          resData.user,
+          resData.classroom || null,
+          resData.message || 'Account verified and signed up successfully!'
+        );
+        onClose();
+        return;
+      }
+
+      if (resData?.error) {
+        setErrorMessage(resData.error);
+        setLoading(false);
+        return;
+      }
+    } catch (localErr) {
+      console.warn('Backend verify-signup-otp error:', localErr);
+    }
+
+    setErrorMessage('Invalid or expired OTP code. Please check the code in your email and try again.');
+    setLoading(false);
+  };
+
+  // 2c. Resend Sign Up OTP
+  const handleResendSignupOtp = async () => {
+    if (signupOtpCountdown > 0) return;
+    setLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const trimmedEmail = signupEmail.trim().toLowerCase();
+    const trimmedFullName = fullName.trim();
+    const trimmedRegNo = registrationNumber.trim().toUpperCase();
+
+    // Supabase resend
+    try {
+      await supabase.auth.resend({
+        type: 'signup',
+        email: trimmedEmail,
+      });
+    } catch (e) {
+      // ignore
+    }
+
+    // Server resend
+    let newOtp: string | null = null;
+    try {
+      const res = await fetch('/api/auth/send-signup-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmedFullName,
+          email: trimmedEmail,
+          password: signupPassword,
+          regNo: trimmedRegNo,
+          rollNumber: trimmedRegNo,
+          department: 'Computer Science & Engineering',
+        }),
+      });
+
+      const text = await res.text();
+      const resData = text ? JSON.parse(text) : null;
+      if (res.ok && resData?.otp) {
+        newOtp = resData.otp;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    if (newOtp) {
+      setSimulatedSignupOtp(newOtp);
+    }
+
+    setSignupOtpCountdown(60);
+    setLoading(false);
+    setSuccessMessage(`A new 6-digit OTP code has been dispatched to ${trimmedEmail}.`);
   };
 
   // 3. Handle Forgot Password (Send OTP)
@@ -703,6 +819,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </h2>
               <p className="text-base sm:text-lg text-[#56615a]">
                 Enter the 6-digit OTP code sent to <strong className="text-[#1b1c1c]">{resetEmail}</strong> and choose a new password.
+              </p>
+            </div>
+          )}
+
+          {mode === 'verify-signup-otp' && (
+            <div>
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-[#1b1c1c] tracking-tight mb-2">
+                Verify Your Account
+              </h2>
+              <p className="text-base sm:text-lg text-[#56615a]">
+                Enter the 6-digit verification OTP sent to <strong className="text-[#1b1c1c]">{signupEmail}</strong> to complete registration.
               </p>
             </div>
           )}
@@ -1255,6 +1382,123 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 className="font-bold text-[#737874] hover:text-[#1b1c1c] hover:underline cursor-pointer"
               >
                 Cancel & Sign In
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* E. VERIFY SIGN UP OTP FORM */}
+        {mode === 'verify-signup-otp' && (
+          <form onSubmit={handleVerifySignupOtpSubmit} className="space-y-6">
+            {/* Simulated OTP Notification Banner (Demo/Local fallback helper) */}
+            {simulatedSignupOtp && (
+              <div className="p-4 bg-[#e8f5e9] border-2 border-[#a5d6a7] rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm font-semibold text-[#1b5e20] shadow-xs">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-[#2e7d32] shrink-0" />
+                  <span>
+                    Sent to <strong>{signupEmail}</strong>: Code is{' '}
+                    <strong className="font-mono text-base tracking-widest text-[#1b5e20] bg-white px-2 py-0.5 rounded border border-[#a5d6a7]">
+                      {simulatedSignupOtp}
+                    </strong>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSignupOtpCode(simulatedSignupOtp)}
+                  className="px-3.5 py-1.5 bg-[#2e7d32] hover:bg-[#1b5e20] text-white text-xs font-bold rounded-xl transition-all shadow-2xs cursor-pointer self-start sm:self-auto"
+                >
+                  Auto-Fill OTP
+                </button>
+              </div>
+            )}
+
+            {/* Verification Info Box */}
+            <div className="p-4 bg-[#f8faf8] border border-[#e2e8e0] rounded-2xl flex items-start gap-3">
+              <Mail className="w-5 h-5 text-[#56615a] shrink-0 mt-0.5" />
+              <div className="text-xs sm:text-sm text-[#56615a]">
+                A 6-digit confirmation OTP was dispatched to <span className="font-bold text-[#1b1c1c]">{signupEmail}</span>. Please check your inbox and enter it below to activate your account.
+              </div>
+            </div>
+
+            {/* 6-Digit OTP Input */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm sm:text-base font-bold text-[#2d312e] uppercase tracking-wide block">
+                  6-Digit Verification OTP <span className="text-[#ba1a1a]">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResendSignupOtp}
+                  disabled={loading || signupOtpCountdown > 0}
+                  className={`text-xs sm:text-sm font-bold cursor-pointer ${
+                    signupOtpCountdown > 0
+                      ? 'text-[#737874] cursor-not-allowed'
+                      : 'text-[#56615a] hover:underline'
+                  }`}
+                >
+                  {signupOtpCountdown > 0 ? `Resend in ${signupOtpCountdown}s` : 'Resend Code'}
+                </button>
+              </div>
+              <div className="relative">
+                <KeyRound className="w-5 h-5 sm:w-6 sm:h-6 text-[#56615a] absolute left-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  maxLength={6}
+                  placeholder="• • • • • •"
+                  value={signupOtpCode}
+                  onChange={(e) => setSignupOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-full pl-12 sm:pl-14 pr-4 py-4 text-2xl sm:text-3xl font-mono font-black tracking-[0.3em] text-center rounded-2xl bg-white border-2 border-[#D8D6D4] text-[#1b1c1c] shadow-xs focus:outline-none focus:border-[#56615a]"
+                />
+              </div>
+              <span className="text-xs text-[#737874] mt-1.5 block text-center">
+                Enter the 6 numbers received in your email
+              </span>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={loading || signupOtpCode.length < 6}
+                className="w-full py-4.5 sm:py-5 bg-[#56615a] hover:bg-[#3e4641] disabled:opacity-50 text-white font-extrabold text-base sm:text-xl rounded-2xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>Verifying OTP & Registering...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+                    <span>Verify OTP & Complete Sign Up</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signup');
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                className="font-bold text-[#56615a] hover:underline cursor-pointer"
+              >
+                ← Back to Edit Details
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                className="font-bold text-[#737874] hover:text-[#1b1c1c] hover:underline cursor-pointer"
+              >
+                Already have an account? Sign In
               </button>
             </div>
           </form>

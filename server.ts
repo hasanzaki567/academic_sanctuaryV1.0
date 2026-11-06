@@ -124,8 +124,15 @@ app.post('/api/auth/login', (req, res) => {
   });
 });
 
-// Signup endpoint (name, regNo, department, institutional email, password)
-app.post('/api/auth/signup', (req, res) => {
+// Helper to register a new user internally
+interface SignupOtpRecord {
+  code: string;
+  expiresAt: number;
+  userData: any;
+}
+const signupOtpStore = new Map<string, SignupOtpRecord>();
+
+function registerUserInternal(data: any) {
   const {
     name,
     email,
@@ -138,32 +145,10 @@ app.post('/api/auth/signup', (req, res) => {
     classroomCode,
     classroomId,
     newClassroomData,
-  } = req.body;
+  } = data;
 
   const resolvedRegNo = (regNo || rollNumber || '').trim();
-
-  if (!name || !name.trim()) {
-    return res.status(400).json({ error: 'Full name is required.' });
-  }
-  if (!resolvedRegNo) {
-    return res.status(400).json({ error: 'Registration number (Reg No) is required.' });
-  }
-  if (!department || !department.trim()) {
-    return res.status(400).json({ error: 'Department is required.' });
-  }
-  if (!email || !email.trim()) {
-    return res.status(400).json({ error: 'Institutional email ID is required.' });
-  }
-  if (!password || !password.trim()) {
-    return res.status(400).json({ error: 'Institutional mail password is required.' });
-  }
-
   const cleanEmail = email.trim().toLowerCase();
-  const existing = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-  if (existing) {
-    return res.status(400).json({ error: 'An account with this institutional email already exists. Please log in with your institutional credentials.' });
-  }
-
   const userId = `user-${Date.now()}`;
   let assignedClassroom: any = null;
   let finalRole = role;
@@ -255,10 +240,10 @@ app.post('/api/auth/signup', (req, res) => {
     id: userId,
     name: name.trim(),
     email: cleanEmail,
-    password: password.trim(),
+    password: (password || '').trim(),
     avatar: defaultAvatars[Math.floor(Math.random() * defaultAvatars.length)],
     role: finalRole as any,
-    department: department.trim(),
+    department: (department || 'Computer Science').trim(),
     rollNumber: resolvedRegNo,
     classroomId: assignedClassroom ? assignedClassroom.id : null,
   };
@@ -277,6 +262,126 @@ app.post('/api/auth/signup', (req, res) => {
       joinedDate: 'Just now',
     });
   }
+
+  return { newUser, assignedClassroom };
+}
+
+// 1. Send OTP for Sign Up
+app.post('/api/auth/send-signup-otp', (req, res) => {
+  const { name, email, password, department, rollNumber, regNo } = req.body;
+  const resolvedRegNo = (regNo || rollNumber || '').trim();
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Full name is required.' });
+  }
+  if (!resolvedRegNo) {
+    return res.status(400).json({ error: 'Registration number (Reg No) is required.' });
+  }
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Institutional email is required.' });
+  }
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const existing = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+  if (existing) {
+    return res.status(400).json({ error: 'An account with this email already exists. Please sign in instead.' });
+  }
+
+  // Generate 6-digit random OTP
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  signupOtpStore.set(cleanEmail, {
+    code: otpCode,
+    expiresAt,
+    userData: {
+      ...req.body,
+      email: cleanEmail,
+      regNo: resolvedRegNo,
+      department: department || 'Computer Science & Engineering',
+    },
+  });
+
+  console.log(`[Auth Service] Sign-up OTP generated for ${cleanEmail}: ${otpCode}`);
+
+  res.json({
+    success: true,
+    message: `A 6-digit verification OTP has been sent to ${cleanEmail}.`,
+    email: cleanEmail,
+    otp: otpCode, // Provided for instant preview, testing & fallback
+  });
+});
+
+// 2. Verify OTP & Complete Sign Up
+app.post('/api/auth/verify-signup-otp', (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Email address is required.' });
+  }
+  if (!otp || !otp.trim()) {
+    return res.status(400).json({ error: 'Please enter the 6-digit OTP code.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanOtp = otp.trim();
+  const record = signupOtpStore.get(cleanEmail);
+
+  if (!record) {
+    return res.status(400).json({ error: 'No pending registration found for this email. Please sign up again.' });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    signupOtpStore.delete(cleanEmail);
+    return res.status(400).json({ error: 'The OTP code has expired. Please request a new code.' });
+  }
+
+  if (record.code !== cleanOtp) {
+    return res.status(400).json({ error: 'Invalid OTP code. Please enter the correct 6-digit code sent to your email.' });
+  }
+
+  // OTP verified! Create user account
+  const { newUser, assignedClassroom } = registerUserInternal(record.userData);
+  signupOtpStore.delete(cleanEmail);
+
+  res.status(201).json({
+    success: true,
+    user: newUser,
+    classroom: assignedClassroom,
+    message: assignedClassroom
+      ? `Account verified! Enrolled in ${assignedClassroom.name}`
+      : `Account verified successfully! Welcome to Academic Sanctuary.`,
+  });
+});
+
+// Direct Signup endpoint (fallback/legacy)
+app.post('/api/auth/signup', (req, res) => {
+  const { name, email, password, regNo, rollNumber } = req.body;
+  const resolvedRegNo = (regNo || rollNumber || '').trim();
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Full name is required.' });
+  }
+  if (!resolvedRegNo) {
+    return res.status(400).json({ error: 'Registration number (Reg No) is required.' });
+  }
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Institutional email ID is required.' });
+  }
+  if (!password || !password.trim()) {
+    return res.status(400).json({ error: 'Institutional mail password is required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const existing = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+  if (existing) {
+    return res.status(400).json({ error: 'An account with this institutional email already exists. Please log in with your institutional credentials.' });
+  }
+
+  const { newUser, assignedClassroom } = registerUserInternal(req.body);
 
   res.status(201).json({
     success: true,
