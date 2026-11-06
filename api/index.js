@@ -3,6 +3,641 @@ import express from "express";
 import http from "http";
 import path from "path";
 import { WebSocketServer, WebSocket } from "ws";
+
+// src/lib/supabase-db.ts
+import { createClient } from "@supabase/supabase-js";
+import dotenv from "dotenv";
+dotenv.config();
+var SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://tsiyeueuisjpqsvtgmlk.supabase.co";
+var SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_wNkOnVDEhhsotWe4jDBVGg_HssinMbR";
+var supabaseClient = null;
+function getSupabase() {
+  if (!supabaseClient) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    });
+  }
+  return supabaseClient;
+}
+function classroomToRow(c) {
+  return {
+    id: c.id,
+    code: c.code.toUpperCase(),
+    name: c.name,
+    college_name: c.collegeName || "Academic University",
+    location: c.location || "Campus",
+    department: c.department || "General Academic",
+    course: c.course || "General Program",
+    degree_level: c.degreeLevel || "undergraduate",
+    batch_year: c.batchYear || "2026",
+    section: c.section || "Section A",
+    semester: c.semester || "Semester 1",
+    super_admin_id: c.superAdminId || null,
+    member_count: c.memberCount || 1,
+    created_at: c.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function rowToClassroom(r) {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    collegeName: r.college_name || "Academic University",
+    location: r.location || "Campus",
+    department: r.department || "General Academic",
+    course: r.course || "General Program",
+    degreeLevel: r.degree_level || "undergraduate",
+    batchYear: r.batch_year || "2026",
+    section: r.section || "Section A",
+    semester: r.semester || "Semester 1",
+    superAdminId: r.super_admin_id || "",
+    memberCount: r.member_count ?? 1,
+    createdAt: r.created_at || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function memberToRow(m) {
+  return {
+    id: m.id,
+    classroom_id: m.classroomId,
+    user_id: m.id.length === 36 ? m.id : null,
+    name: m.name,
+    email: m.email,
+    avatar: m.avatar || null,
+    role: m.role || "student",
+    roll_number: m.rollNumber || null,
+    joined_date: m.joinedDate || "Today"
+  };
+}
+function rowToMember(r) {
+  return {
+    id: r.id || r.user_id,
+    classroomId: r.classroom_id,
+    name: r.name,
+    email: r.email,
+    avatar: r.avatar || "",
+    role: r.role || "student",
+    rollNumber: r.roll_number || "",
+    joinedDate: r.joined_date || "Today"
+  };
+}
+function subjectToRow(s) {
+  return {
+    id: s.id,
+    classroom_id: s.classroomId,
+    code: s.code,
+    name: s.name,
+    professor: s.professor || "Faculty Coordinator",
+    description: s.description || "",
+    credit_hours: s.creditHours || 3,
+    materials_count: s.materialsCount || 0,
+    notes_count: s.notesCount || 0,
+    pyqs_count: s.pyqsCount || 0
+  };
+}
+function rowToSubject(r) {
+  return {
+    id: r.id,
+    classroomId: r.classroom_id,
+    code: r.code,
+    name: r.name,
+    professor: r.professor || "Faculty Coordinator",
+    description: r.description || "",
+    creditHours: r.credit_hours || 3,
+    materialsCount: r.materials_count || 0,
+    notesCount: r.notes_count || 0,
+    pyqsCount: r.pyqs_count || 0
+  };
+}
+function materialToRow(m) {
+  return {
+    id: m.id,
+    subject_id: m.subjectId,
+    subject_code: m.subjectCode,
+    subject_name: m.subjectName,
+    title: m.title,
+    description: m.description || "",
+    type: m.type,
+    file_format: m.fileFormat,
+    file_size: m.fileSize || "1.0 MB",
+    file_url: m.fileUrl || null,
+    uploaded_by: m.uploadedBy,
+    uploaded_date: m.uploadedDate || "Today",
+    created_at: m.createdAt || Date.now(),
+    downloads_count: m.downloadsCount || 0,
+    views_count: m.viewsCount || 0,
+    is_verified: m.isVerified ?? true,
+    content_snippet: m.contentSnippet || null,
+    tags: Array.isArray(m.tags) ? m.tags : [],
+    unit: m.unit || "General",
+    recommended_exam: m.recommendedExam || null
+  };
+}
+function rowToMaterial(r, fallbackClassroomId) {
+  return {
+    id: r.id,
+    subjectId: r.subject_id,
+    subjectCode: r.subject_code,
+    subjectName: r.subject_name,
+    title: r.title,
+    description: r.description || "",
+    type: r.type,
+    fileFormat: r.file_format,
+    fileSize: r.file_size || "1.0 MB",
+    fileUrl: r.file_url || void 0,
+    uploadedBy: r.uploaded_by || {
+      id: "system",
+      name: "Academic Contributor",
+      avatar: "",
+      role: "student"
+    },
+    uploadedDate: r.uploaded_date || "Today",
+    createdAt: Number(r.created_at) || Date.now(),
+    downloadsCount: r.downloads_count || 0,
+    viewsCount: r.views_count || 0,
+    isVerified: r.is_verified ?? true,
+    contentSnippet: r.content_snippet || void 0,
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    unit: r.unit || "General",
+    recommendedExam: r.recommended_exam || void 0
+  };
+}
+function announcementToRow(a) {
+  return {
+    id: a.id,
+    classroom_id: a.classroomId,
+    title: a.title,
+    description: a.description || "",
+    author: a.author || "Cohort Admin",
+    is_urgent: Boolean(a.isUrgent),
+    timestamp: a.timestamp || "Today"
+  };
+}
+function rowToAnnouncement(r) {
+  return {
+    id: r.id,
+    classroomId: r.classroom_id,
+    title: r.title,
+    description: r.description || "",
+    author: r.author || "Cohort Admin",
+    isUrgent: Boolean(r.is_urgent),
+    timestamp: r.timestamp || "Today"
+  };
+}
+function examToRow(e) {
+  return {
+    id: e.id,
+    classroom_id: e.classroomId,
+    subject_name: e.subjectName,
+    subject_code: e.subjectCode,
+    date: e.date,
+    days_remaining: e.daysRemaining || 0,
+    time: e.time || "10:00 AM - 01:00 PM",
+    exam_type: e.examType || "IAT",
+    venue: e.venue || "Academic Hall",
+    syllabus: e.syllabus || "",
+    progress_percent: e.progressPercent || 0,
+    is_completed: Boolean(e.isCompleted)
+  };
+}
+function rowToExam(r) {
+  return {
+    id: r.id,
+    classroomId: r.classroom_id,
+    subjectName: r.subject_name,
+    subjectCode: r.subject_code,
+    date: r.date,
+    daysRemaining: r.days_remaining || 0,
+    time: r.time || "10:00 AM - 01:00 PM",
+    examType: r.exam_type || "IAT",
+    venue: r.venue || "Academic Hall",
+    syllabus: r.syllabus || "",
+    progressPercent: r.progress_percent || 0,
+    isCompleted: Boolean(r.is_completed)
+  };
+}
+function chatGroupToRow(g) {
+  return {
+    id: g.id,
+    classroom_id: g.classroomId,
+    name: g.name,
+    avatar: g.avatar || null,
+    description: g.description || null,
+    is_direct: Boolean(g.isDirect),
+    created_by: g.createdBy || null,
+    admin_ids: g.adminIds || [],
+    member_ids: g.memberIds || [],
+    banned_user_ids: g.bannedUserIds || []
+  };
+}
+function rowToChatGroup(r) {
+  return {
+    id: r.id,
+    classroomId: r.classroom_id,
+    name: r.name,
+    avatar: r.avatar || "",
+    description: r.description || void 0,
+    isDirect: Boolean(r.is_direct),
+    createdBy: r.created_by || "",
+    adminIds: r.admin_ids || [],
+    memberIds: r.member_ids || [],
+    bannedUserIds: r.banned_user_ids || [],
+    createdAt: r.created_at || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function chatMessageToRow(m) {
+  return {
+    id: m.id,
+    group_id: m.groupId,
+    sender_id: m.senderId,
+    sender_name: m.senderName,
+    sender_avatar: m.senderAvatar || null,
+    type: m.type || "text",
+    content: m.content || "",
+    file_url: m.fileUrl || null,
+    file_name: m.fileName || null,
+    file_size: m.fileSize || null,
+    forwarded_material: m.forwardedMaterial || null,
+    timestamp: m.timestamp || "Today",
+    created_at: m.createdAt || Date.now(),
+    delivered_to: m.deliveredTo || [],
+    read_by: m.readBy || [],
+    reactions: m.reactions || [],
+    reply_to: m.replyTo || null,
+    is_deleted: Boolean(m.isDeleted),
+    is_pinned: Boolean(m.isPinned),
+    is_starred: Boolean(m.isStarred),
+    starred_by: m.starredBy || []
+  };
+}
+function rowToChatMessage(r) {
+  return {
+    id: r.id,
+    groupId: r.group_id,
+    senderId: r.sender_id,
+    senderName: r.sender_name,
+    senderAvatar: r.sender_avatar || "",
+    type: r.type || "text",
+    content: r.content || "",
+    fileUrl: r.file_url || void 0,
+    fileName: r.file_name || void 0,
+    fileSize: r.file_size || void 0,
+    forwardedMaterial: r.forwarded_material || void 0,
+    timestamp: r.timestamp || "Today",
+    createdAt: Number(r.created_at) || Date.now(),
+    deliveredTo: r.delivered_to || [],
+    readBy: r.read_by || [],
+    reactions: r.reactions || [],
+    replyTo: r.reply_to || void 0,
+    isDeleted: Boolean(r.is_deleted),
+    isPinned: Boolean(r.is_pinned),
+    isStarred: Boolean(r.is_starred),
+    starredBy: r.starred_by || []
+  };
+}
+async function dbFetchClassrooms() {
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.from("classrooms").select("*").order("created_at", { ascending: false });
+    if (error) {
+      console.warn("dbFetchClassrooms warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToClassroom);
+  } catch (err) {
+    console.warn("dbFetchClassrooms exception:", err);
+    return [];
+  }
+}
+async function dbSaveClassroom(cls) {
+  try {
+    const sb = getSupabase();
+    const row = classroomToRow(cls);
+    const { error } = await sb.from("classrooms").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveClassroom warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveClassroom exception:", err);
+    return false;
+  }
+}
+async function dbFindClassroomByCode(code) {
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.from("classrooms").select("*").ilike("code", code.trim()).maybeSingle();
+    if (error || !data) return null;
+    return rowToClassroom(data);
+  } catch (err) {
+    console.warn("dbFindClassroomByCode exception:", err);
+    return null;
+  }
+}
+async function dbFetchSubjects(classroomId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("subjects").select("*");
+    if (classroomId) {
+      query = query.eq("classroom_id", classroomId);
+    }
+    const { data, error } = await query.order("code", { ascending: true });
+    if (error) {
+      console.warn("dbFetchSubjects warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToSubject);
+  } catch (err) {
+    console.warn("dbFetchSubjects exception:", err);
+    return [];
+  }
+}
+async function dbSaveSubject(s) {
+  try {
+    const sb = getSupabase();
+    const row = subjectToRow(s);
+    const { error } = await sb.from("subjects").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveSubject warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveSubject exception:", err);
+    return false;
+  }
+}
+async function dbFetchMaterials(classroomId, subjectId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("materials").select("*");
+    if (subjectId) {
+      query = query.eq("subject_id", subjectId);
+    }
+    const { data, error } = await query.order("created_at", { ascending: true });
+    if (error) {
+      console.warn("dbFetchMaterials warning:", error.message);
+      return [];
+    }
+    return (data || []).map((r) => rowToMaterial(r, classroomId));
+  } catch (err) {
+    console.warn("dbFetchMaterials exception:", err);
+    return [];
+  }
+}
+async function dbSaveMaterial(m) {
+  try {
+    const sb = getSupabase();
+    const row = materialToRow(m);
+    const { error } = await sb.from("materials").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveMaterial warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveMaterial exception:", err);
+    return false;
+  }
+}
+async function dbFetchAnnouncements(classroomId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("announcements").select("*");
+    if (classroomId) {
+      query = query.eq("classroom_id", classroomId);
+    }
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) {
+      console.warn("dbFetchAnnouncements warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToAnnouncement);
+  } catch (err) {
+    console.warn("dbFetchAnnouncements exception:", err);
+    return [];
+  }
+}
+async function dbSaveAnnouncement(a) {
+  try {
+    const sb = getSupabase();
+    const row = announcementToRow(a);
+    const { error } = await sb.from("announcements").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveAnnouncement warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveAnnouncement exception:", err);
+    return false;
+  }
+}
+async function dbFetchExams(classroomId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("exams").select("*");
+    if (classroomId) {
+      query = query.eq("classroom_id", classroomId);
+    }
+    const { data, error } = await query.order("date", { ascending: true });
+    if (error) {
+      console.warn("dbFetchExams warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToExam);
+  } catch (err) {
+    console.warn("dbFetchExams exception:", err);
+    return [];
+  }
+}
+async function dbSaveExam(e) {
+  try {
+    const sb = getSupabase();
+    const row = examToRow(e);
+    const { error } = await sb.from("exams").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveExam warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveExam exception:", err);
+    return false;
+  }
+}
+async function dbUpdateExam(id, updates) {
+  try {
+    const sb = getSupabase();
+    const patch = {};
+    if (updates.isCompleted !== void 0) patch.is_completed = updates.isCompleted;
+    if (updates.progressPercent !== void 0) patch.progress_percent = updates.progressPercent;
+    if (updates.daysRemaining !== void 0) patch.days_remaining = updates.daysRemaining;
+    if (updates.date !== void 0) patch.date = updates.date;
+    if (updates.time !== void 0) patch.time = updates.time;
+    if (updates.venue !== void 0) patch.venue = updates.venue;
+    const { error } = await sb.from("exams").update(patch).eq("id", id);
+    if (error) {
+      console.warn("dbUpdateExam warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbUpdateExam exception:", err);
+    return false;
+  }
+}
+async function dbFetchMembers(classroomId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("classroom_members").select("*");
+    if (classroomId) {
+      query = query.eq("classroom_id", classroomId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      console.warn("dbFetchMembers warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToMember);
+  } catch (err) {
+    console.warn("dbFetchMembers exception:", err);
+    return [];
+  }
+}
+async function dbSaveMember(m) {
+  try {
+    const sb = getSupabase();
+    const row = memberToRow(m);
+    const { error } = await sb.from("classroom_members").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveMember warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveMember exception:", err);
+    return false;
+  }
+}
+async function dbUpdateMemberRole(id, role) {
+  try {
+    const sb = getSupabase();
+    const { error } = await sb.from("classroom_members").update({ role }).eq("id", id);
+    if (error) {
+      console.warn("dbUpdateMemberRole warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbUpdateMemberRole exception:", err);
+    return false;
+  }
+}
+async function dbDeleteMember(id) {
+  try {
+    const sb = getSupabase();
+    const { error } = await sb.from("classroom_members").delete().eq("id", id);
+    if (error) {
+      console.warn("dbDeleteMember warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbDeleteMember exception:", err);
+    return false;
+  }
+}
+async function dbFetchChatGroups(classroomId) {
+  try {
+    const sb = getSupabase();
+    let query = sb.from("chat_groups").select("*");
+    if (classroomId) {
+      query = query.eq("classroom_id", classroomId);
+    }
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) {
+      console.warn("dbFetchChatGroups warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToChatGroup);
+  } catch (err) {
+    console.warn("dbFetchChatGroups exception:", err);
+    return [];
+  }
+}
+async function dbSaveChatGroup(g) {
+  try {
+    const sb = getSupabase();
+    const row = chatGroupToRow(g);
+    const { error } = await sb.from("chat_groups").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveChatGroup warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveChatGroup exception:", err);
+    return false;
+  }
+}
+async function dbFetchChatMessages(groupId) {
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.from("chat_messages").select("*").eq("group_id", groupId).order("created_at", { ascending: true });
+    if (error) {
+      console.warn("dbFetchChatMessages warning:", error.message);
+      return [];
+    }
+    return (data || []).map(rowToChatMessage);
+  } catch (err) {
+    console.warn("dbFetchChatMessages exception:", err);
+    return [];
+  }
+}
+async function dbSaveChatMessage(m) {
+  try {
+    const sb = getSupabase();
+    const row = chatMessageToRow(m);
+    const { error } = await sb.from("chat_messages").upsert(row, { onConflict: "id" });
+    if (error) {
+      console.warn("dbSaveChatMessage warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbSaveChatMessage exception:", err);
+    return false;
+  }
+}
+async function dbUpdateChatMessage(id, patch) {
+  try {
+    const sb = getSupabase();
+    const rowPatch = {};
+    if (patch.content !== void 0) rowPatch.content = patch.content;
+    if (patch.reactions !== void 0) rowPatch.reactions = patch.reactions;
+    if (patch.isPinned !== void 0) rowPatch.is_pinned = patch.isPinned;
+    if (patch.isStarred !== void 0) rowPatch.is_starred = patch.isStarred;
+    if (patch.starredBy !== void 0) rowPatch.starred_by = patch.starredBy;
+    if (patch.deliveredTo !== void 0) rowPatch.delivered_to = patch.deliveredTo;
+    if (patch.readBy !== void 0) rowPatch.read_by = patch.readBy;
+    if (patch.isDeleted !== void 0) rowPatch.is_deleted = patch.isDeleted;
+    const { error } = await sb.from("chat_messages").update(rowPatch).eq("id", id);
+    if (error) {
+      console.warn("dbUpdateChatMessage warning:", error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("dbUpdateChatMessage exception:", err);
+    return false;
+  }
+}
+
+// server.ts
 var app = express();
 var PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
 app.use(express.json({ limit: "50mb" }));
@@ -484,17 +1119,41 @@ app.post("/api/auth/verify-reset-otp", (req, res) => {
     message: "Password successfully updated! You can now log in with your new password."
   });
 });
-app.get("/api/classrooms", (req, res) => {
+app.get("/api/classrooms", async (req, res) => {
+  try {
+    const dbCls = await dbFetchClassrooms();
+    if (dbCls && dbCls.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbCls.forEach((c) => map.set(c.id, c));
+      classrooms.forEach((c) => {
+        if (!map.has(c.id)) map.set(c.id, c);
+      });
+      classrooms = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Classroom query warning:", err);
+  }
   res.json(classrooms);
 });
-app.get("/api/classrooms/:id", (req, res) => {
-  const cls = classrooms.find((c) => c.id === req.params.id);
+app.get("/api/classrooms/:id", async (req, res) => {
+  let cls = classrooms.find((c) => c.id === req.params.id);
+  if (!cls) {
+    try {
+      const dbCls = await dbFetchClassrooms();
+      cls = dbCls.find((c) => c.id === req.params.id);
+      if (cls && !classrooms.some((c) => c.id === cls.id)) {
+        classrooms.push(cls);
+      }
+    } catch (err) {
+      console.warn("Classroom lookup warning:", err);
+    }
+  }
   if (!cls) {
     return res.status(404).json({ error: "Cohort classroom not found." });
   }
   res.json(cls);
 });
-app.post("/api/classrooms", (req, res) => {
+app.post("/api/classrooms", async (req, res) => {
   const {
     collegeName,
     location,
@@ -531,6 +1190,7 @@ app.post("/api/classrooms", (req, res) => {
     createdAt: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
   };
   classrooms.unshift(newClassroom);
+  dbSaveClassroom(newClassroom).catch((e) => console.warn("Supabase save classroom warning:", e));
   activeUser.classroomId = newClassroom.id;
   activeUser.role = "super_admin";
   currentUser = activeUser;
@@ -541,29 +1201,31 @@ app.post("/api/classrooms", (req, res) => {
   } else {
     registeredUsers.push(activeUser);
   }
+  const memRecord = {
+    id: activeUser.id,
+    name: activeUser.name,
+    email: activeUser.email,
+    avatar: activeUser.avatar,
+    role: "super_admin",
+    rollNumber: activeUser.rollNumber || "ADM001",
+    joinedDate: "Today",
+    classroomId: newClassroom.id,
+    department: activeUser.department
+  };
   const memIndex = members.findIndex((m) => m.id === activeUser.id);
   if (memIndex >= 0) {
     members[memIndex].classroomId = newClassroom.id;
     members[memIndex].role = "super_admin";
   } else {
-    members.push({
-      id: activeUser.id,
-      name: activeUser.name,
-      email: activeUser.email,
-      avatar: activeUser.avatar,
-      role: "super_admin",
-      rollNumber: activeUser.rollNumber || "ADM001",
-      joinedDate: "Today",
-      classroomId: newClassroom.id,
-      department: activeUser.department
-    });
+    members.push(memRecord);
   }
+  dbSaveMember(memRecord).catch((e) => console.warn("Supabase save member warning:", e));
   if (Array.isArray(selectedSubjects) && selectedSubjects.length > 0) {
     selectedSubjects.forEach((subName, idx) => {
       const match = subName.match(/^(.*?)(?:\s*\((.*?)\))?$/);
       const name = match && match[1] ? match[1].trim() : subName;
       const code = match && match[2] ? match[2].trim() : `CS30${idx + 1}`;
-      subjects.push({
+      const newSub = {
         id: `sub-${Date.now()}-${idx}`,
         classroomId: newClassroom.id,
         code,
@@ -574,7 +1236,9 @@ app.post("/api/classrooms", (req, res) => {
         materialsCount: 0,
         notesCount: 0,
         pyqsCount: 0
-      });
+      };
+      subjects.push(newSub);
+      dbSaveSubject(newSub).catch((e) => console.warn("Supabase save subject warning:", e));
     });
   }
   const generalChatGroup = {
@@ -596,16 +1260,30 @@ app.post("/api/classrooms", (req, res) => {
     role: "admin",
     joinedAt: (/* @__PURE__ */ new Date()).toISOString()
   });
+  dbSaveChatGroup(generalChatGroup).catch((e) => console.warn("Supabase save chat group warning:", e));
   setAuthCookies(res, activeUser, newClassroom.id);
   res.status(201).json(newClassroom);
 });
-app.post("/api/classrooms/join", (req, res) => {
+app.post("/api/classrooms/join", async (req, res) => {
   const { code } = req.body;
   if (!code || !code.trim()) {
     return res.status(400).json({ error: "Classroom access code is required." });
   }
   const cleanCode = code.trim().toLowerCase();
-  const targetClassroom = classrooms.find((c) => c.code.toLowerCase() === cleanCode);
+  let targetClassroom = classrooms.find((c) => c.code.toLowerCase() === cleanCode);
+  if (!targetClassroom) {
+    try {
+      const dbCls = await dbFindClassroomByCode(cleanCode);
+      if (dbCls) {
+        targetClassroom = dbCls;
+        if (!classrooms.some((c) => c.id === dbCls.id)) {
+          classrooms.unshift(dbCls);
+        }
+      }
+    } catch (err) {
+      console.warn("Supabase find classroom warning:", err);
+    }
+  }
   if (!targetClassroom) {
     return res.status(404).json({
       error: `Invalid classroom code "${code.trim().toUpperCase()}". No cohort found with this code. Please verify the code with your instructor or peers.`
@@ -619,20 +1297,23 @@ app.post("/api/classrooms/join", (req, res) => {
   const reg = registeredUsers.find((u) => u.id === activeUser.id);
   if (reg) reg.classroomId = targetClassroom.id;
   const alreadyMember = members.some((m) => m.id === activeUser.id && m.classroomId === targetClassroom.id);
+  const memberRecord = {
+    id: activeUser.id,
+    name: activeUser.name,
+    email: activeUser.email,
+    avatar: activeUser.avatar,
+    role: "student",
+    rollNumber: activeUser.rollNumber || `STU${members.length + 101}`,
+    joinedDate: "Today",
+    classroomId: targetClassroom.id,
+    department: targetClassroom.department
+  };
   if (!alreadyMember) {
-    members.push({
-      id: activeUser.id,
-      name: activeUser.name,
-      email: activeUser.email,
-      avatar: activeUser.avatar,
-      role: "student",
-      rollNumber: activeUser.rollNumber || `STU${members.length + 101}`,
-      joinedDate: "Today",
-      classroomId: targetClassroom.id,
-      department: targetClassroom.department
-    });
+    members.push(memberRecord);
+    dbSaveMember(memberRecord).catch((e) => console.warn("Supabase save member warning:", e));
   }
   targetClassroom.memberCount = members.filter((m) => m.classroomId === targetClassroom.id).length;
+  dbSaveClassroom(targetClassroom).catch((e) => console.warn("Supabase update classroom member count warning:", e));
   let generalGroup = chatGroups.find((g) => g.classroomId === targetClassroom.id && !g.isDirect);
   if (!generalGroup) {
     generalGroup = {
@@ -648,6 +1329,7 @@ app.post("/api/classrooms/join", (req, res) => {
       bannedUserIds: []
     };
     chatGroups.push(generalGroup);
+    dbSaveChatGroup(generalGroup).catch((e) => console.warn("Supabase save chat group warning:", e));
   }
   if (!chatGroupMembers.some((m) => m.groupId === generalGroup.id && m.userId === activeUser.id)) {
     chatGroupMembers.push({
@@ -660,8 +1342,21 @@ app.post("/api/classrooms/join", (req, res) => {
   setAuthCookies(res, activeUser, targetClassroom.id);
   res.json({ success: true, classroom: targetClassroom });
 });
-app.get("/api/subjects", (req, res) => {
+app.get("/api/subjects", async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbSubs = await dbFetchSubjects(classroomId);
+    if (dbSubs && dbSubs.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbSubs.forEach((s) => map.set(s.id, s));
+      subjects.forEach((s) => {
+        if (!map.has(s.id)) map.set(s.id, s);
+      });
+      subjects = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch subjects warning:", err);
+  }
   const list = classroomId ? subjects.filter((s) => s.classroomId === classroomId) : subjects;
   const subjectsWithLiveCounts = list.map((s) => {
     const subMats = materials.filter((m) => m.subjectId === s.id || m.subjectCode?.toLowerCase() === s.code?.toLowerCase());
@@ -674,8 +1369,19 @@ app.get("/api/subjects", (req, res) => {
   });
   res.json(subjectsWithLiveCounts);
 });
-app.get("/api/subjects/:id", (req, res) => {
-  const subject = subjects.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+app.get("/api/subjects/:id", async (req, res) => {
+  let subject = subjects.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+  if (!subject) {
+    try {
+      const dbSubs = await dbFetchSubjects();
+      subject = dbSubs.find((s) => s.id === req.params.id || s.code.toLowerCase() === req.params.id.toLowerCase());
+      if (subject && !subjects.some((s) => s.id === subject.id)) {
+        subjects.push(subject);
+      }
+    } catch (err) {
+      console.warn("Supabase find subject warning:", err);
+    }
+  }
   if (!subject) {
     return res.status(404).json({ error: "Subject not found" });
   }
@@ -687,7 +1393,7 @@ app.get("/api/subjects/:id", (req, res) => {
     pyqsCount: subMats.filter((m) => m.type === "pyqs").length
   });
 });
-app.post("/api/subjects", (req, res) => {
+app.post("/api/subjects", async (req, res) => {
   const { code, name, professor, description, classroomId = "cls-1", creditHours = 4 } = req.body;
   const newSubject = {
     id: `sub-${Date.now()}`,
@@ -702,10 +1408,24 @@ app.post("/api/subjects", (req, res) => {
     pyqsCount: 0
   };
   subjects.push(newSubject);
+  dbSaveSubject(newSubject).catch((e) => console.warn("Supabase save subject warning:", e));
   res.status(201).json(newSubject);
 });
-app.get("/api/materials", (req, res) => {
+app.get("/api/materials", async (req, res) => {
   const { subjectId, type, search, classroomId } = req.query;
+  try {
+    const dbMats = await dbFetchMaterials(classroomId, subjectId);
+    if (dbMats && dbMats.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbMats.forEach((m) => map.set(m.id, m));
+      materials.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      materials = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch materials warning:", err);
+  }
   let result = [...materials];
   if (classroomId) {
     const classroomSubjectIds = new Set(
@@ -730,7 +1450,7 @@ app.get("/api/materials", (req, res) => {
   result.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   res.json(result);
 });
-app.post("/api/materials", (req, res) => {
+app.post("/api/materials", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const {
     subjectId,
@@ -772,6 +1492,7 @@ app.post("/api/materials", (req, res) => {
         pyqsCount: 0
       };
       subjects.push(subject);
+      dbSaveSubject(subject).catch((e) => console.warn("Supabase save dynamic subject warning:", e));
     }
   }
   if (!subject) {
@@ -792,6 +1513,7 @@ app.post("/api/materials", (req, res) => {
         pyqsCount: 0
       };
       subjects.push(subject);
+      dbSaveSubject(subject).catch((e) => console.warn("Supabase save default subject warning:", e));
     }
   }
   const now = Date.now();
@@ -830,19 +1552,33 @@ app.post("/api/materials", (req, res) => {
 Uploaded notes and study guide for ${subject.name}.`
   };
   materials.push(newMaterial);
+  dbSaveMaterial(newMaterial).catch((e) => console.warn("Supabase save material warning:", e));
   if (type === "notes") subject.notesCount += 1;
   if (type === "pyqs") subject.pyqsCount += 1;
   subject.materialsCount += 1;
   res.status(201).json(newMaterial);
 });
-app.get("/api/announcements", (req, res) => {
+app.get("/api/announcements", async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbAnns = await dbFetchAnnouncements(classroomId);
+    if (dbAnns && dbAnns.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbAnns.forEach((a) => map.set(a.id, a));
+      announcements.forEach((a) => {
+        if (!map.has(a.id)) map.set(a.id, a);
+      });
+      announcements = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch announcements warning:", err);
+  }
   if (classroomId) {
     return res.json(announcements.filter((a) => a.classroomId === classroomId));
   }
   res.json(announcements);
 });
-app.post("/api/announcements", (req, res) => {
+app.post("/api/announcements", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const { title, description, isUrgent = false, classroomId } = req.body;
   const newAnn = {
@@ -855,16 +1591,30 @@ app.post("/api/announcements", (req, res) => {
     isUrgent: Boolean(isUrgent)
   };
   announcements.unshift(newAnn);
+  dbSaveAnnouncement(newAnn).catch((e) => console.warn("Supabase save announcement warning:", e));
   res.status(201).json(newAnn);
 });
-app.get("/api/exams", (req, res) => {
+app.get("/api/exams", async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbExs = await dbFetchExams(classroomId);
+    if (dbExs && dbExs.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbExs.forEach((e) => map.set(e.id, e));
+      exams.forEach((e) => {
+        if (!map.has(e.id)) map.set(e.id, e);
+      });
+      exams = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch exams warning:", err);
+  }
   if (classroomId) {
     return res.json(exams.filter((e) => e.classroomId === classroomId));
   }
   res.json(exams);
 });
-app.post("/api/exams", (req, res) => {
+app.post("/api/exams", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({ error: "Access denied. Only cohort administrators can publish examination schedules." });
@@ -892,9 +1642,10 @@ app.post("/api/exams", (req, res) => {
     isCompleted: Boolean(isCompleted || daysRemaining < 0)
   };
   exams.push(newExam);
+  dbSaveExam(newExam).catch((e) => console.warn("Supabase save exam warning:", e));
   res.status(201).json(newExam);
 });
-app.patch("/api/exams/:id", (req, res) => {
+app.patch("/api/exams/:id", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({ error: "Access denied. Only cohort administrators can modify examination schedules." });
@@ -910,10 +1661,27 @@ app.patch("/api/exams/:id", (req, res) => {
   if (typeof req.body.progressPercent === "number") {
     exam.progressPercent = req.body.progressPercent;
   }
+  dbUpdateExam(req.params.id, {
+    isCompleted: exam.isCompleted,
+    progressPercent: exam.progressPercent
+  }).catch((e) => console.warn("Supabase update exam warning:", e));
   res.json(exam);
 });
-app.get("/api/members", (req, res) => {
+app.get("/api/members", async (req, res) => {
   const { classroomId } = req.query;
+  try {
+    const dbMems = await dbFetchMembers(classroomId);
+    if (dbMems && dbMems.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbMems.forEach((m) => map.set(m.id, m));
+      members.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      members = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch members warning:", err);
+  }
   if (classroomId) {
     const userIdsInClassroom = registeredUsers.filter((u) => u.classroomId === classroomId).map((u) => u.id);
     const filtered = members.filter(
@@ -923,7 +1691,7 @@ app.get("/api/members", (req, res) => {
   }
   res.json(members);
 });
-app.post("/api/members", (req, res) => {
+app.post("/api/members", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({ error: "Only cohort administrators can add members." });
@@ -977,13 +1745,15 @@ app.post("/api/members", (req, res) => {
     department: newUser.department
   };
   members.push(newMemberRecord);
+  dbSaveMember(newMemberRecord).catch((e) => console.warn("Supabase save member warning:", e));
   const targetClassroom = classrooms.find((c) => c.id === targetClassroomId);
   if (targetClassroom) {
     targetClassroom.memberCount = (targetClassroom.memberCount || 0) + 1;
+    dbSaveClassroom(targetClassroom).catch((e) => console.warn("Supabase update classroom member count warning:", e));
   }
   res.status(201).json(newMemberRecord);
 });
-app.patch("/api/members/:id/role", (req, res) => {
+app.patch("/api/members/:id/role", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({ error: "Only cohort administrators can manage member roles." });
@@ -1004,6 +1774,7 @@ app.patch("/api/members/:id/role", (req, res) => {
     return res.status(403).json({ error: "Only the Super Admin can demote other administrators." });
   }
   member.role = role;
+  dbUpdateMemberRole(id, role).catch((e) => console.warn("Supabase update member role warning:", e));
   const regUser = registeredUsers.find((u) => u.id === id);
   if (regUser) {
     regUser.role = role;
@@ -1013,7 +1784,7 @@ app.patch("/api/members/:id/role", (req, res) => {
   }
   res.json({ success: true, member });
 });
-app.delete("/api/members/:id", (req, res) => {
+app.delete("/api/members/:id", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({ error: "Only cohort administrators can remove members." });
@@ -1027,6 +1798,7 @@ app.delete("/api/members/:id", (req, res) => {
     return res.status(403).json({ error: "Cannot remove Super Admin." });
   }
   const removed = members.splice(index, 1)[0];
+  dbDeleteMember(id).catch((e) => console.warn("Supabase delete member warning:", e));
   const regIdx = registeredUsers.findIndex((u) => u.id === id);
   if (regIdx !== -1) {
     registeredUsers.splice(regIdx, 1);
@@ -1095,6 +1867,55 @@ app.get("/api/classrooms/:id/banned", (req, res) => {
 var chatGroups = [];
 var chatGroupMembers = [];
 var chatMessages = [];
+async function syncWithSupabase() {
+  try {
+    const [dbCls, dbSubs, dbMats, dbAnns, dbExs, dbMems, dbGrps] = await Promise.all([
+      dbFetchClassrooms(),
+      dbFetchSubjects(),
+      dbFetchMaterials(),
+      dbFetchAnnouncements(),
+      dbFetchExams(),
+      dbFetchMembers(),
+      dbFetchChatGroups()
+    ]);
+    if (dbCls && dbCls.length > 0) {
+      classrooms = dbCls;
+    }
+    if (dbSubs && dbSubs.length > 0) {
+      subjects = dbSubs;
+    }
+    if (dbMats && dbMats.length > 0) {
+      materials = dbMats;
+    }
+    if (dbAnns && dbAnns.length > 0) {
+      announcements = dbAnns;
+    }
+    if (dbExs && dbExs.length > 0) {
+      exams = dbExs;
+    }
+    if (dbMems && dbMems.length > 0) {
+      members = dbMems;
+    }
+    if (dbGrps && dbGrps.length > 0) {
+      chatGroups = dbGrps;
+      dbGrps.forEach((g) => {
+        (g.memberIds || []).forEach((uid) => {
+          if (!chatGroupMembers.some((m) => m.groupId === g.id && m.userId === uid)) {
+            chatGroupMembers.push({
+              groupId: g.id,
+              userId: uid,
+              role: (g.adminIds || []).includes(uid) ? "admin" : "member",
+              joinedAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+          }
+        });
+      });
+    }
+  } catch (err) {
+    console.warn("[Supabase Sync] Background startup sync notice:", err);
+  }
+}
+syncWithSupabase();
 function getCurrentOrReqUser(req) {
   const headerUserId = req ? req.headers["x-user-id"] || req.query.userId || req.body && req.body.userId : void 0;
   if (headerUserId) {
@@ -1257,10 +2078,35 @@ function getMemberProfile(userId) {
     rollNumber: ""
   };
 }
-app.get("/api/chat/groups", (req, res) => {
+app.get("/api/chat/groups", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const classroomId = req.query.classroomId || activeUser.classroomId || (classrooms[0]?.id || "");
   const userId = req.query.userId || activeUser.id;
+  try {
+    const dbGrps = await dbFetchChatGroups(classroomId);
+    if (dbGrps && dbGrps.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbGrps.forEach((g) => map.set(g.id, g));
+      chatGroups.forEach((g) => {
+        if (!map.has(g.id)) map.set(g.id, g);
+      });
+      chatGroups = Array.from(map.values());
+      dbGrps.forEach((g) => {
+        (g.memberIds || []).forEach((uid) => {
+          if (!chatGroupMembers.some((m) => m.groupId === g.id && m.userId === uid)) {
+            chatGroupMembers.push({
+              groupId: g.id,
+              userId: uid,
+              role: (g.adminIds || []).includes(uid) ? "admin" : "member",
+              joinedAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+          }
+        });
+      });
+    }
+  } catch (err) {
+    console.warn("Supabase fetch chat groups warning:", err);
+  }
   const userMemberships = chatGroupMembers.filter((m) => m.userId === userId);
   const userGroupIds = new Set(userMemberships.map((m) => m.groupId));
   const relevantGroups = chatGroups.filter((g) => userGroupIds.has(g.id) && (!classroomId || g.classroomId === classroomId)).map((g) => {
@@ -1307,7 +2153,7 @@ app.get("/api/chat/groups", (req, res) => {
   });
   res.json(relevantGroups);
 });
-app.post("/api/chat/groups", (req, res) => {
+app.post("/api/chat/groups", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   if (activeUser.role !== "super_admin" && activeUser.role !== "admin") {
     return res.status(403).json({
@@ -1350,6 +2196,18 @@ app.post("/api/chat/groups", (req, res) => {
       joinedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
   });
+  dbSaveChatGroup({
+    id: newGroup.id,
+    classroomId: newGroup.classroomId,
+    name: newGroup.name,
+    avatar: newGroup.avatar,
+    description: newGroup.description,
+    isDirect: false,
+    createdBy: newGroup.createdBy,
+    adminIds: [activeUser.id],
+    memberIds: [activeUser.id, ...uniqueMemberIds],
+    createdAt: newGroup.createdAt
+  }).catch((e) => console.warn("Supabase save chat group warning:", e));
   const welcomeMsg = {
     id: `msg-${Date.now()}`,
     groupId,
@@ -1645,9 +2503,22 @@ app.patch("/api/chat/groups/:id/members/:userId/role", (req, res) => {
   });
   res.json({ success: true, newRole: role });
 });
-app.get("/api/chat/groups/:id/messages", (req, res) => {
+app.get("/api/chat/groups/:id/messages", async (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const groupId = req.params.id;
+  try {
+    const dbMsgs = await dbFetchChatMessages(groupId);
+    if (dbMsgs && dbMsgs.length > 0) {
+      const map = /* @__PURE__ */ new Map();
+      dbMsgs.forEach((m) => map.set(m.id, m));
+      chatMessages.forEach((m) => {
+        if (!map.has(m.id)) map.set(m.id, m);
+      });
+      chatMessages = Array.from(map.values());
+    }
+  } catch (err) {
+    console.warn("Supabase fetch chat messages warning:", err);
+  }
   const isMember = chatGroupMembers.some(
     (m) => m.groupId === groupId && m.userId === activeUser.id
   );
@@ -1697,6 +2568,7 @@ app.post("/api/chat/groups/:id/messages", (req, res) => {
     readBy: [activeUser.id]
   };
   chatMessages.push(newMsg);
+  dbSaveChatMessage(newMsg).catch((e) => console.warn("Supabase save chat message warning:", e));
   const group = chatGroups.find((g) => g.id === groupId);
   if (group) {
     group.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -1727,6 +2599,7 @@ app.post("/api/chat/messages/:id/react", (req, res) => {
       userName: activeUser.name
     });
   }
+  dbUpdateChatMessage(msg.id, { reactions: msg.reactions }).catch((e) => console.warn("Supabase update reactions warning:", e));
   broadcastToGroup(msg.groupId, {
     type: "chat:message_reaction",
     groupId: msg.groupId,
@@ -1752,6 +2625,7 @@ app.post("/api/chat/messages/:id/pin", (req, res) => {
       group.pinnedMessageId = void 0;
     }
   }
+  dbUpdateChatMessage(msg.id, { isPinned: msg.isPinned }).catch((e) => console.warn("Supabase update pin warning:", e));
   broadcastToGroup(msg.groupId, {
     type: "chat:message_pinned",
     groupId: msg.groupId,
@@ -1776,6 +2650,7 @@ app.post("/api/chat/messages/:id/star", (req, res) => {
     isStarred = true;
   }
   msg.isStarred = isStarred;
+  dbUpdateChatMessage(msg.id, { isStarred: msg.isStarred, starredBy: msg.starredBy }).catch((e) => console.warn("Supabase update star warning:", e));
   res.json({ success: true, isStarred, messageId: msg.id });
 });
 app.post("/api/chat/messages/forward", (req, res) => {
@@ -1955,6 +2830,10 @@ app.delete("/api/chat/messages/:id", (req, res) => {
   msg.content = "This message was deleted";
   msg.fileUrl = void 0;
   msg.forwardedMaterial = void 0;
+  dbUpdateChatMessage(msg.id, {
+    isDeleted: true,
+    content: "This message was deleted"
+  }).catch((e) => console.warn("Supabase update delete message warning:", e));
   broadcastToGroup(msg.groupId, {
     type: "chat:message_deleted",
     groupId: msg.groupId,

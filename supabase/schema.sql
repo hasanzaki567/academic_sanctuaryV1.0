@@ -87,6 +87,7 @@ create table if not exists public.subjects (
 -- ==========================================================
 create table if not exists public.materials (
   id text primary key,
+  classroom_id text references public.classrooms(id) on delete cascade,
   subject_id text references public.subjects(id) on delete cascade not null,
   subject_code text not null,
   subject_name text not null,
@@ -107,6 +108,9 @@ create table if not exists public.materials (
   unit text,
   recommended_exam text
 );
+
+-- Add column if table already exists
+alter table public.materials add column if not exists classroom_id text references public.classrooms(id) on delete cascade;
 
 -- ==========================================================
 -- 6. ANNOUNCEMENTS TABLE
@@ -187,6 +191,8 @@ create table if not exists public.chat_messages (
 
 -- ==========================================================
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES
+-- Permissive policies allowing seamless reads and writes for
+-- both authenticated users and backend proxy/anon clients.
 -- ==========================================================
 alter table public.profiles enable row level security;
 alter table public.classrooms enable row level security;
@@ -198,76 +204,51 @@ alter table public.exams enable row level security;
 alter table public.chat_groups enable row level security;
 alter table public.chat_messages enable row level security;
 
--- Drop previous policies if re-running
+-- Drop previous restrictive policies
 drop policy if exists "Profiles are viewable by authenticated users" on public.profiles;
 drop policy if exists "Users can insert their own profile" on public.profiles;
 drop policy if exists "Users can update their own profile" on public.profiles;
+drop policy if exists "Profiles public access" on public.profiles;
+create policy "Profiles public access" on public.profiles for all to anon, authenticated using (true) with check (true);
 
-create policy "Profiles are viewable by authenticated users"
-  on public.profiles for select
-  to authenticated
-  using (true);
-
-create policy "Users can insert their own profile"
-  on public.profiles for insert
-  to authenticated
-  with check (auth.uid() = id);
-
-create policy "Users can update their own profile"
-  on public.profiles for update
-  to authenticated
-  using (auth.uid() = id);
-
--- Classrooms policies
 drop policy if exists "Classrooms are viewable by authenticated users" on public.classrooms;
 drop policy if exists "Classrooms can be created by authenticated users" on public.classrooms;
 drop policy if exists "Classrooms can be updated by members" on public.classrooms;
+drop policy if exists "Classrooms public access" on public.classrooms;
+create policy "Classrooms public access" on public.classrooms for all to anon, authenticated using (true) with check (true);
 
-create policy "Classrooms are viewable by authenticated users"
-  on public.classrooms for select
-  to authenticated
-  using (true);
+drop policy if exists "Classroom members public access" on public.classroom_members;
+create policy "Classroom members public access" on public.classroom_members for all to anon, authenticated using (true) with check (true);
 
-create policy "Classrooms can be created by authenticated users"
-  on public.classrooms for insert
-  to authenticated
-  with check (true);
-
-create policy "Classrooms can be updated by members"
-  on public.classrooms for update
-  to authenticated
-  using (true);
-
--- Subjects, Materials, Announcements, Exams, Chat policies
 drop policy if exists "Allow authenticated read subjects" on public.subjects;
 drop policy if exists "Allow authenticated write subjects" on public.subjects;
-create policy "Allow authenticated read subjects" on public.subjects for select to authenticated using (true);
-create policy "Allow authenticated write subjects" on public.subjects for all to authenticated using (true);
+drop policy if exists "Subjects public access" on public.subjects;
+create policy "Subjects public access" on public.subjects for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Allow authenticated read materials" on public.materials;
 drop policy if exists "Allow authenticated write materials" on public.materials;
-create policy "Allow authenticated read materials" on public.materials for select to authenticated using (true);
-create policy "Allow authenticated write materials" on public.materials for all to authenticated using (true);
+drop policy if exists "Materials public access" on public.materials;
+create policy "Materials public access" on public.materials for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Allow authenticated read announcements" on public.announcements;
 drop policy if exists "Allow authenticated write announcements" on public.announcements;
-create policy "Allow authenticated read announcements" on public.announcements for select to authenticated using (true);
-create policy "Allow authenticated write announcements" on public.announcements for all to authenticated using (true);
+drop policy if exists "Announcements public access" on public.announcements;
+create policy "Announcements public access" on public.announcements for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Allow authenticated read exams" on public.exams;
 drop policy if exists "Allow authenticated write exams" on public.exams;
-create policy "Allow authenticated read exams" on public.exams for select to authenticated using (true);
-create policy "Allow authenticated write exams" on public.exams for all to authenticated using (true);
+drop policy if exists "Exams public access" on public.exams;
+create policy "Exams public access" on public.exams for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Allow authenticated read chat_groups" on public.chat_groups;
 drop policy if exists "Allow authenticated write chat_groups" on public.chat_groups;
-create policy "Allow authenticated read chat_groups" on public.chat_groups for select to authenticated using (true);
-create policy "Allow authenticated write chat_groups" on public.chat_groups for all to authenticated using (true);
+drop policy if exists "Chat groups public access" on public.chat_groups;
+create policy "Chat groups public access" on public.chat_groups for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Allow authenticated read chat_messages" on public.chat_messages;
 drop policy if exists "Allow authenticated write chat_messages" on public.chat_messages;
-create policy "Allow authenticated read chat_messages" on public.chat_messages for select to authenticated using (true);
-create policy "Allow authenticated write chat_messages" on public.chat_messages for all to authenticated using (true);
+drop policy if exists "Chat messages public access" on public.chat_messages;
+create policy "Chat messages public access" on public.chat_messages for all to anon, authenticated using (true) with check (true);
 
 -- ==========================================================
 -- 11. INDEXES FOR HIGH-SPEED LOOKUPS
@@ -279,6 +260,7 @@ create index if not exists idx_classroom_members_cid on public.classroom_members
 create index if not exists idx_classroom_members_uid on public.classroom_members (user_id);
 create index if not exists idx_subjects_classroomId on public.subjects (classroom_id);
 create index if not exists idx_materials_subjectId on public.materials (subject_id);
+create index if not exists idx_materials_classroomId on public.materials (classroom_id);
 create index if not exists idx_materials_type on public.materials (type);
 create index if not exists idx_announcements_cid on public.announcements (classroom_id);
 create index if not exists idx_exams_cid on public.exams (classroom_id);
@@ -324,7 +306,7 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- ==========================================================
--- 13. OPTIONAL SEED DATA (Default Cohort & Core Subjects)
+-- 13. SEED DEFAULT COHORT (For instant demo & fresh setups)
 -- ==========================================================
 insert into public.classrooms (
   id, code, name, college_name, location, department, course, degree_level, batch_year, section, semester, super_admin_id, member_count
