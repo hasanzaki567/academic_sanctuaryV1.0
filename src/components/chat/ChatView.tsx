@@ -187,17 +187,36 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // Refs
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeGroupIdRef = useRef<string | null>(activeGroupId);
+
+  useEffect(() => {
+    activeGroupIdRef.current = activeGroupId;
+  }, [activeGroupId]);
+
+  const getAuthHeaders = () => ({
+    'Content-Type': 'application/json',
+    'x-user-id': currentUser.id,
+    'x-user-name': currentUser.name,
+    'x-user-role': currentUser.role,
+  });
 
   // 1. Fetch Conversations List
   const fetchGroups = async () => {
     try {
       const res = await fetch(
-        `/api/chat/groups?classroomId=${activeClassroomId}&userId=${currentUser.id}`
+        `/api/chat/groups?classroomId=${activeClassroomId}&userId=${currentUser.id}`,
+        {
+          headers: {
+            'x-user-id': currentUser.id,
+            'x-user-name': currentUser.name,
+            'x-user-role': currentUser.role,
+          },
+        }
       );
       if (res.ok) {
         const data = await res.json();
         setGroups(data);
-        if (!activeGroupId && data.length > 0) {
+        if (!activeGroupIdRef.current && data.length > 0) {
           setActiveGroupId(data[0].id);
         }
       }
@@ -221,9 +240,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // 2. Fetch Active Group Details & Messages
   const fetchActiveConversation = async (groupId: string) => {
     try {
+      const authH = {
+        'x-user-id': currentUser.id,
+        'x-user-name': currentUser.name,
+        'x-user-role': currentUser.role,
+      };
       const [groupRes, msgsRes] = await Promise.all([
-        fetch(`/api/chat/groups/${groupId}`),
-        fetch(`/api/chat/groups/${groupId}/messages`),
+        fetch(`/api/chat/groups/${groupId}`, { headers: authH }),
+        fetch(`/api/chat/groups/${groupId}/messages`, { headers: authH }),
       ]);
 
       if (groupRes.ok) {
@@ -251,7 +275,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const markGroupAsRead = async (groupId: string) => {
     try {
-      await fetch(`/api/chat/groups/${groupId}/read`, { method: 'POST' });
+      await fetch(`/api/chat/groups/${groupId}/read`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id,
+          'x-user-name': currentUser.name,
+          'x-user-role': currentUser.role,
+        },
+      });
       // update unreadCount in local group list
       setGroups((prev) =>
         prev.map((g) => (g.id === groupId ? { ...g, unreadCount: 0 } : g))
@@ -271,188 +303,222 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
-  // 3. WebSocket Real-Time Setup
+  // 3. Resilient WebSocket Real-Time Setup (No chat-switch thrashing, auto-reconnect, fallback polling)
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const socket = new WebSocket(wsUrl);
-    wsRef.current = socket;
+    let isUnmounted = false;
+    let reconnectTimer: any = null;
 
-    socket.onopen = () => {
-      // Authenticate socket session
-      socket.send(
-        JSON.stringify({
-          type: 'auth',
-          userId: currentUser.id,
-          classroomId: activeClassroomId,
-        })
-      );
-    };
+    const connectWebSocket = () => {
+      if (isUnmounted) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      const socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
 
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      socket.onopen = () => {
+        // Authenticate socket session
+        socket.send(
+          JSON.stringify({
+            type: 'auth',
+            userId: currentUser.id,
+            classroomId: activeClassroomId,
+          })
+        );
+      };
 
-        if (data.type === 'chat:online_users') {
-          setOnlineUserIds(new Set(data.onlineUserIds));
-        } else if (data.type === 'chat:presence') {
-          setOnlineUserIds((prev) => {
-            const next = new Set(prev);
-            if (data.isOnline) {
-              next.add(data.userId);
-            } else {
-              next.delete(data.userId);
-            }
-            return next;
-          });
-        } else if (data.type === 'chat:message_new') {
-          const newMsg: ChatMessage = data.message;
-          // If message is in current open group
-          if (newMsg.groupId === activeGroupId) {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-            markGroupAsRead(newMsg.groupId);
-          }
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const currentActiveId = activeGroupIdRef.current;
 
-          // Update sidebar preview
-          setGroups((prev) => {
-            return prev.map((g) => {
-              if (g.id === newMsg.groupId) {
-                const unread =
-                  g.id === activeGroupId || newMsg.senderId === currentUser.id
-                    ? 0
-                    : (g.unreadCount || 0) + 1;
-                return {
-                  ...g,
-                  unreadCount: unread,
-                  lastMessage: {
-                    text:
-                      newMsg.type === 'material_forward'
-                        ? `📄 Forwarded: ${newMsg.forwardedMaterial?.title || 'Material'}`
-                        : newMsg.type === 'camera_image'
-                        ? '📷 Photo snapshot'
-                        : newMsg.type === 'file'
-                        ? `📎 File: ${newMsg.fileName || 'Attachment'}`
-                        : newMsg.content,
-                    timestamp: newMsg.timestamp,
-                    senderName: newMsg.senderName,
-                    senderId: newMsg.senderId,
-                    type: newMsg.type,
-                  },
-                };
-              }
-              return g;
-            });
-          });
-        } else if (data.type === 'chat:typing') {
-          if (data.groupId === activeGroupId && data.userId !== currentUser.id) {
-            setTypingUsers((prev) => {
-              const updated = new Map(prev);
-              if (data.isTyping) {
-                updated.set(data.userId, data.userName);
+          if (data.type === 'chat:online_users') {
+            setOnlineUserIds(new Set(data.onlineUserIds));
+          } else if (data.type === 'chat:presence') {
+            setOnlineUserIds((prev) => {
+              const next = new Set(prev);
+              if (data.isOnline) {
+                next.add(data.userId);
               } else {
-                updated.delete(data.userId);
+                next.delete(data.userId);
               }
-              return updated;
+              return next;
             });
-          }
-        } else if (data.type === 'chat:read_receipt') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (!m.readBy.includes(data.userId)) {
-                  return { ...m, readBy: [...m.readBy, data.userId] };
+          } else if (data.type === 'chat:message_new') {
+            const newMsg: ChatMessage = data.message;
+            // If message is in current open group
+            if (newMsg.groupId === currentActiveId) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+              });
+              markGroupAsRead(newMsg.groupId);
+            }
+
+            // Update sidebar preview and auto-fetch if new group
+            setGroups((prev) => {
+              const exists = prev.some((g) => g.id === newMsg.groupId);
+              if (!exists) {
+                fetchGroups();
+              }
+              return prev.map((g) => {
+                if (g.id === newMsg.groupId) {
+                  const unread =
+                    g.id === currentActiveId || newMsg.senderId === currentUser.id
+                      ? 0
+                      : (g.unreadCount || 0) + 1;
+                  return {
+                    ...g,
+                    unreadCount: unread,
+                    lastMessage: {
+                      text:
+                        newMsg.type === 'material_forward'
+                          ? `📄 Forwarded: ${newMsg.forwardedMaterial?.title || 'Material'}`
+                          : newMsg.type === 'camera_image'
+                          ? '📷 Photo snapshot'
+                          : newMsg.type === 'file'
+                          ? `📎 File: ${newMsg.fileName || 'Attachment'}`
+                          : newMsg.content,
+                      timestamp: newMsg.timestamp,
+                      senderName: newMsg.senderName,
+                      senderId: newMsg.senderId,
+                      type: newMsg.type,
+                    },
+                  };
                 }
-                return m;
-              })
-            );
-          }
-        } else if (data.type === 'chat:message_reaction') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === data.messageId ? { ...m, reactions: data.reactions } : m
-              )
-            );
-          }
-        } else if (data.type === 'chat:message_pinned') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) => ({
-                ...m,
-                isPinned: m.id === data.messageId ? data.isPinned : false,
-              }))
-            );
-            if (activeGroupDetails) {
-              setActiveGroupDetails((prev) =>
-                prev ? { ...prev, pinnedMessageId: data.isPinned ? data.messageId : undefined } : null
+                return g;
+              });
+            });
+          } else if (data.type === 'chat:typing') {
+            if (data.groupId === currentActiveId && data.userId !== currentUser.id) {
+              setTypingUsers((prev) => {
+                const updated = new Map(prev);
+                if (data.isTyping) {
+                  updated.set(data.userId, data.userName);
+                } else {
+                  updated.delete(data.userId);
+                }
+                return updated;
+              });
+            }
+          } else if (data.type === 'chat:read_receipt') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (!m.readBy.includes(data.userId)) {
+                    return { ...m, readBy: [...m.readBy, data.userId] };
+                  }
+                  return m;
+                })
               );
             }
-          }
-        } else if (data.type === 'chat:message_deleted') {
-          if (data.groupId === activeGroupId) {
+          } else if (data.type === 'chat:message_reaction') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId ? { ...m, reactions: data.reactions } : m
+                )
+              );
+            }
+          } else if (data.type === 'chat:message_pinned') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) => ({
+                  ...m,
+                  isPinned: m.id === data.messageId ? data.isPinned : false,
+                }))
+              );
+              if (activeGroupDetails) {
+                setActiveGroupDetails((prev) =>
+                  prev ? { ...prev, pinnedMessageId: data.isPinned ? data.messageId : undefined } : null
+                );
+              }
+            }
+          } else if (data.type === 'chat:message_deleted') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId
+                    ? {
+                        ...m,
+                        isDeleted: true,
+                        content: 'This message was deleted',
+                        fileUrl: undefined,
+                        forwardedMaterial: undefined,
+                      }
+                    : m
+                )
+              );
+            }
+          } else if (data.type === 'chat:user_profile_updated') {
+            if (data.userId === currentUser.id && onUpdateCurrentUser) {
+              onUpdateCurrentUser({ name: data.name, avatar: data.avatar });
+            }
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === data.messageId
-                  ? {
-                      ...m,
-                      isDeleted: true,
-                      content: 'This message was deleted',
-                      fileUrl: undefined,
-                      forwardedMaterial: undefined,
-                    }
+                m.senderId === data.userId
+                  ? { ...m, senderName: data.name, senderAvatar: data.avatar }
                   : m
               )
             );
+            fetchGroups();
+            if (currentActiveId) fetchActiveConversation(currentActiveId);
+          } else if (data.type === 'chat:friend_renamed') {
+            if (onUpdateFriendName) {
+              onUpdateFriendName(data.userId, data.newName);
+            }
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.senderId === data.userId ? { ...m, senderName: data.newName } : m
+              )
+            );
+            fetchGroups();
+            if (currentActiveId) fetchActiveConversation(currentActiveId);
+          } else if (
+            data.type === 'chat:group_created' ||
+            data.type === 'chat:group_updated' ||
+            data.type === 'chat:group_deleted' ||
+            data.type === 'chat:members_added' ||
+            data.type === 'chat:member_removed' ||
+            data.type === 'chat:role_changed'
+          ) {
+            fetchGroups();
+            if (currentActiveId) {
+              fetchActiveConversation(currentActiveId);
+            }
           }
-        } else if (data.type === 'chat:user_profile_updated') {
-          if (data.userId === currentUser.id && onUpdateCurrentUser) {
-            onUpdateCurrentUser({ name: data.name, avatar: data.avatar });
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.senderId === data.userId
-                ? { ...m, senderName: data.name, senderAvatar: data.avatar }
-                : m
-            )
-          );
-          fetchGroups();
-          if (activeGroupId) fetchActiveConversation(activeGroupId);
-        } else if (data.type === 'chat:friend_renamed') {
-          if (onUpdateFriendName) {
-            onUpdateFriendName(data.userId, data.newName);
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.senderId === data.userId ? { ...m, senderName: data.newName } : m
-            )
-          );
-          fetchGroups();
-          if (activeGroupId) fetchActiveConversation(activeGroupId);
-        } else if (
-          data.type === 'chat:group_created' ||
-          data.type === 'chat:group_updated' ||
-          data.type === 'chat:group_deleted' ||
-          data.type === 'chat:members_added' ||
-          data.type === 'chat:member_removed' ||
-          data.type === 'chat:role_changed'
-        ) {
-          fetchGroups();
-          if (activeGroupId) {
-            fetchActiveConversation(activeGroupId);
-          }
+        } catch (e) {
+          console.error('Error handling WebSocket message payload:', e);
         }
-      } catch (e) {
-        console.error('Error handling WebSocket message payload:', e);
-      }
+      };
+
+      socket.onclose = () => {
+        if (!isUnmounted) {
+          reconnectTimer = setTimeout(connectWebSocket, 3000);
+        }
+      };
     };
 
+    connectWebSocket();
+
+    // Fallback Polling Interval (every 6 seconds if WS is reconnecting or down)
+    const pollInterval = setInterval(() => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        if (activeGroupIdRef.current) {
+          fetchActiveConversation(activeGroupIdRef.current);
+        }
+        fetchGroups();
+      }
+    }, 6000);
+
     return () => {
-      socket.close();
+      isUnmounted = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(pollInterval);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
-  }, [activeClassroomId, currentUser.id, activeGroupId]);
+  }, [activeClassroomId, currentUser.id]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -518,9 +584,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       const res = await fetch(`/api/chat/groups/${activeGroupId}/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ ...payload, replyTo: replyToPayload }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error('Failed to send message:', errData);
+        showToast(errData.error || 'Failed to send message.');
+        return;
+      }
 
       if (res.ok) {
         const newMsg = await res.json();
@@ -558,7 +631,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/react`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ emoji }),
       });
       if (res.ok) {
@@ -577,6 +650,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/pin`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -598,6 +672,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/star`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -625,7 +700,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/messages/forward', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ messageId, targetGroupIds }),
       });
       if (res.ok) {
@@ -724,7 +799,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // 8. Delete Message Handler
   const handleDeleteMessage = async (msgId: string) => {
     try {
-      const res = await fetch(`/api/chat/messages/${msgId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/chat/messages/${msgId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         setMessages((prev) =>
           prev.map((m) =>
@@ -750,7 +828,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/direct', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ targetUserId, classroomId: activeClassroomId }),
       });
       if (res.ok) {
@@ -771,7 +849,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     const res = await fetch('/api/chat/groups', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ ...groupData, classroomId: activeClassroomId }),
     });
     if (res.ok) {
@@ -790,7 +868,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/users/profile', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updated),
       });
       if (res.ok) {
@@ -818,7 +896,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/friend-name', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ targetUserId, name: newName, groupId: groupId || activeGroupId }),
       });
       if (res.ok) {
@@ -864,7 +942,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     await fetch(`/api/chat/groups/${activeGroupId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(updates),
     });
     fetchGroups();
@@ -875,7 +953,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ memberIds }),
     });
     fetchActiveConversation(activeGroupId);
@@ -885,6 +963,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     fetchActiveConversation(activeGroupId);
     showToast('Member removed from group.');
@@ -895,6 +974,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}/ban`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         fetchActiveConversation(activeGroupId);
@@ -912,6 +992,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/members/${userId}/ban`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         showToast(`Permanently banned ${userName || 'member'} from cohort.`);
@@ -930,7 +1011,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}/role`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ role: newRole }),
     });
     fetchActiveConversation(activeGroupId);
@@ -938,7 +1019,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const handleDeleteGroup = async () => {
     if (!activeGroupId) return;
-    await fetch(`/api/chat/groups/${activeGroupId}`, { method: 'DELETE' });
+    await fetch(`/api/chat/groups/${activeGroupId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
     setIsInfoDrawerOpen(false);
     setActiveGroupId(null);
     setActiveGroupDetails(null);
@@ -949,6 +1033,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${currentUser.id}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     setIsInfoDrawerOpen(false);
     setActiveGroupId(null);
@@ -1479,6 +1564,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
                     const isReadByOthers =
                       msg.readBy.filter((id) => id !== currentUser.id).length > 0;
+                    const isDeliveredToOthers =
+                      msg.deliveredTo && msg.deliveredTo.filter((id) => id !== currentUser.id).length > 0;
 
                     return (
                       <React.Fragment key={msg.id}>
@@ -1739,11 +1826,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
                               )}
                               <span>{msg.timestamp}</span>
                               {isSelf && (
-                                <span className="ml-0.5">
+                                <span
+                                  className="ml-0.5"
+                                  title={isReadByOthers ? 'Read' : isDeliveredToOthers ? 'Delivered' : 'Sent'}
+                                >
                                   {isReadByOthers ? (
                                     <CheckCheck className="w-4 h-4 text-blue-600 stroke-[2.5]" />
-                                  ) : (
+                                  ) : isDeliveredToOthers ? (
                                     <CheckCheck className="w-4 h-4 text-[#737874]" />
+                                  ) : (
+                                    <Check className="w-4 h-4 text-[#737874]" />
                                   )}
                                 </span>
                               )}

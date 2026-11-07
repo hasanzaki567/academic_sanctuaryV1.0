@@ -140,7 +140,12 @@ export const ForwardMaterialMultiModal: React.FC<ForwardMaterialMultiModalProps>
     try {
       const res = await fetch('/api/chat/materials/forward', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id,
+          'x-user-name': currentUser.name,
+          'x-user-role': currentUser.role,
+        },
         body: JSON.stringify({
           material,
           targetGroupIds: selectedGroupIds,
