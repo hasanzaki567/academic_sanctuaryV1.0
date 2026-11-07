@@ -17,6 +17,7 @@ dist-ssr/
 .env.development.local
 .env.test.local
 .env.production.local
+.academic_sanctuary_cache.json
 
 # Logs
 npm-debug.log*

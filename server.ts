@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   dbFetchClassrooms,
@@ -191,6 +192,13 @@ app.get('/api/auth/me', async (req, res) => {
     } catch (e) {
       console.warn('Classroom lookup in /api/auth/me notice:', e);
     }
+  }
+
+  // If still no classroom associated, auto-associate with first available classroom
+  if (!userClassroom && classrooms.length > 0) {
+    userClassroom = classrooms[0];
+    userToReturn.classroomId = userClassroom.id;
+    setAuthCookies(res, userToReturn, userClassroom.id);
   }
 
   res.json({
@@ -1618,8 +1626,295 @@ let chatGroups: ChatGroupRecord[] = [];
 let chatGroupMembers: GroupMemberRecord[] = [];
 let chatMessages: ChatMessageRecord[] = [];
 
-// Initial Startup Sync with Supabase Database
+// Local Persistence Cache File (Resilience against DB connection drops or RLS blocks)
+const CACHE_FILE = path.join(process.cwd(), '.academic_sanctuary_cache.json');
+let cacheDebounceTimer: NodeJS.Timeout | null = null;
+
+// Local Friend Contact Nicknames: Record<`${viewerId}_${targetUserId}`, string>
+let friendNicknames: Record<string, string> = {};
+
+function getFriendNickname(viewerId: string, targetId: string): string | undefined {
+  return friendNicknames[`${viewerId}_${targetId}`];
+}
+
+function setFriendNickname(viewerId: string, targetId: string, nickname: string) {
+  friendNicknames[`${viewerId}_${targetId}`] = nickname;
+  saveLocalCache();
+}
+
+function saveLocalCache() {
+  if (process.env.VERCEL) return;
+  if (cacheDebounceTimer) clearTimeout(cacheDebounceTimer);
+  cacheDebounceTimer = setTimeout(() => {
+    try {
+      const payload = {
+        classrooms,
+        registeredUsers,
+        subjects,
+        materials,
+        announcements,
+        exams,
+        members,
+        chatGroups,
+        chatGroupMembers,
+        chatMessages,
+        friendNicknames,
+      };
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('Failed to save local cache file:', e);
+    }
+  }, 150);
+}
+
+function loadLocalCache() {
+  if (process.env.VERCEL) return false;
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data) {
+        if (Array.isArray(data.classrooms) && classrooms.length === 0) classrooms = data.classrooms;
+        if (Array.isArray(data.registeredUsers) && registeredUsers.length === 0) registeredUsers = data.registeredUsers;
+        if (Array.isArray(data.subjects) && subjects.length === 0) subjects = data.subjects;
+        if (Array.isArray(data.materials) && materials.length === 0) materials = data.materials;
+        if (Array.isArray(data.announcements) && announcements.length === 0) announcements = data.announcements;
+        if (Array.isArray(data.exams) && exams.length === 0) exams = data.exams;
+        if (Array.isArray(data.members) && members.length === 0) members = data.members;
+        if (Array.isArray(data.chatGroups) && chatGroups.length === 0) chatGroups = data.chatGroups;
+        if (Array.isArray(data.chatGroupMembers) && chatGroupMembers.length === 0) chatGroupMembers = data.chatGroupMembers;
+        if (Array.isArray(data.chatMessages) && chatMessages.length === 0) chatMessages = data.chatMessages;
+        if (data.friendNicknames && typeof data.friendNicknames === 'object') friendNicknames = data.friendNicknames;
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load local cache file:', e);
+  }
+  return false;
+}
+
+// Ensure default fallback cohort if database and cache are empty
+function seedDefaultCohortIfEmpty() {
+  if (classrooms.length === 0) {
+    const defaultCls = {
+      id: 'cls-1',
+      code: 'CSE26A',
+      name: 'B.Tech CSE 2026 - Section A',
+      collegeName: 'Stanford Institute of Technology',
+      location: 'Silicon Valley Campus',
+      department: 'Computer Science & Engineering',
+      course: 'B.Tech Computer Science',
+      degreeLevel: 'undergraduate',
+      batchYear: '2026',
+      section: 'Section A',
+      semester: 'Semester 5',
+      superAdminId: 'user-sarah',
+      memberCount: 4,
+      createdAt: '2026-08-15',
+    };
+    classrooms.push(defaultCls);
+
+    const defaultMembers = [
+      {
+        id: 'user-sarah',
+        name: 'Sarah Jenkins',
+        email: 'sarah.j@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
+        role: 'super_admin' as const,
+        rollNumber: '26CS001',
+        joinedDate: 'Aug 15',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-michael',
+        name: 'Michael Klein',
+        email: 'm.klein@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
+        role: 'admin' as const,
+        rollNumber: '26CS014',
+        joinedDate: 'Aug 16',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-elena',
+        name: 'Elena Rostova',
+        email: 'elena.r@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
+        role: 'student' as const,
+        rollNumber: '26CS028',
+        joinedDate: 'Aug 17',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-david',
+        name: 'David Chen',
+        email: 'd.chen@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
+        role: 'student' as const,
+        rollNumber: '26CS042',
+        joinedDate: 'Aug 18',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+    ];
+
+    defaultMembers.forEach((m) => {
+      if (!members.some((existing) => existing.id === m.id)) members.push(m);
+      if (!registeredUsers.some((u) => u.id === m.id)) {
+        registeredUsers.push({
+          ...m,
+          password: 'password123',
+        });
+      }
+    });
+
+    ensureCohortGeneralGroup('cls-1');
+  }
+
+  // If currentUser is set but lacks a classroom, associate with first classroom
+  if (currentUser && !currentUser.classroomId && classrooms.length > 0) {
+    currentUser.classroomId = classrooms[0].id;
+    if (!members.some((m) => m.id === currentUser.id)) {
+      members.push({
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email,
+        avatar: currentUser.avatar,
+        role: currentUser.role,
+        rollNumber: currentUser.rollNumber || 'STU001',
+        joinedDate: 'Today',
+        classroomId: classrooms[0].id,
+        department: currentUser.department,
+      });
+    }
+  }
+}
+
+// Guarantees that a cohort always has an active General Discussion group
+function ensureCohortGeneralGroup(classroomId: string): ChatGroupRecord {
+  let generalGroup = chatGroups.find((g) => g.classroomId === classroomId && !g.isDirect);
+  const cls = classrooms.find((c) => c.id === classroomId);
+  const clsName = cls?.name || 'Cohort';
+  const clsCode = cls?.code || 'ACAD';
+
+  if (!generalGroup) {
+    generalGroup = {
+      id: `group-${classroomId}-general`,
+      classroomId,
+      name: `${clsName} General`,
+      description: `Official cohort discussion group for ${clsName}`,
+      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(clsCode)}`,
+      createdBy: cls?.superAdminId || 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDirect: false,
+      bannedUserIds: [],
+    };
+    chatGroups.unshift(generalGroup);
+
+    const cohortMemberIds = members.filter((m) => !m.classroomId || m.classroomId === classroomId).map((m) => m.id);
+    dbSaveChatGroup({
+      ...generalGroup,
+      adminIds: [cls?.superAdminId || 'admin'],
+      memberIds: cohortMemberIds.length > 0 ? cohortMemberIds : ['user-sarah'],
+    } as any).catch(() => {});
+    saveLocalCache();
+  }
+
+  // Ensure all classroom members are enrolled in chatGroupMembers
+  const clsMembers = members.filter((m) => !m.classroomId || m.classroomId === classroomId);
+  for (const cm of clsMembers) {
+    if (!chatGroupMembers.some((m) => m.groupId === generalGroup.id && m.userId === cm.id)) {
+      chatGroupMembers.push({
+        groupId: generalGroup.id,
+        userId: cm.id,
+        role: (cm.role === 'super_admin' || cm.role === 'admin') ? 'admin' : 'member',
+        joinedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  return generalGroup;
+}
+
+// Resilient Membership Verifier & Auto-Healer
+function isUserMemberOfGroup(groupId: string, userId: string): boolean {
+  if (!groupId || !userId) return false;
+
+  // 1. Direct membership match
+  if (chatGroupMembers.some((m) => m.groupId === groupId && m.userId === userId)) {
+    return true;
+  }
+
+  // 2. Direct DM match by ID or pattern (dm-userA-userB)
+  const grp = chatGroups.find((g) => g.id === groupId);
+  if (grp && Array.isArray((grp as any).memberIds) && (grp as any).memberIds.includes(userId)) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: (grp as any).adminIds?.includes(userId) ? 'admin' : 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  if (grp && grp.isDirect) {
+    if (groupId.includes(userId)) {
+      chatGroupMembers.push({
+        groupId,
+        userId,
+        role: 'admin',
+        joinedAt: new Date().toISOString(),
+      });
+      return true;
+    }
+  }
+
+  if (groupId.startsWith('dm-') && groupId.includes(userId)) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: 'admin',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  // 3. Cohort General Group match (enrolled members are always valid members)
+  const user = registeredUsers.find((u) => u.id === userId) || members.find((m) => m.id === userId);
+  const targetClassroomId = user?.classroomId || classrooms[0]?.id;
+
+  if (grp && (!grp.classroomId || grp.classroomId === targetClassroomId)) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: (user?.role === 'super_admin' || user?.role === 'admin') ? 'admin' : 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  if (groupId.includes('general')) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  return false;
+}
+
+// Initial Startup Sync with Supabase Database + Local Cache Fallback
 async function syncWithSupabase() {
+  loadLocalCache();
+
   try {
     const [dbCls, dbSubs, dbMats, dbAnns, dbExs, dbMems, dbGrps] = await Promise.all([
       dbFetchClassrooms(),
@@ -1667,6 +1962,9 @@ async function syncWithSupabase() {
   } catch (err) {
     console.warn('[Supabase Sync] Background startup sync notice:', err);
   }
+
+  seedDefaultCohortIfEmpty();
+  saveLocalCache();
 }
 syncWithSupabase();
 
@@ -1750,6 +2048,13 @@ function isUserOnline(userId: string): boolean {
 function broadcastToGroup(groupId: string, data: any, excludeWs?: WebSocket) {
   const memberEntries = chatGroupMembers.filter((m) => m.groupId === groupId);
   const memberUserIds = new Set(memberEntries.map((m) => m.userId));
+  const grp = chatGroups.find((g) => g.id === groupId);
+  if (grp && Array.isArray((grp as any).memberIds)) {
+    (grp as any).memberIds.forEach((id: string) => memberUserIds.add(id));
+  }
+  if (groupId.startsWith('dm-')) {
+    groupId.replace('dm-', '').split('-').forEach((id) => memberUserIds.add(id));
+  }
   const payload = JSON.stringify(data);
 
   for (const [clientWs, info] of connectedSockets.entries()) {
@@ -1880,6 +2185,10 @@ app.get('/api/chat/groups', async (req, res) => {
   const classroomId = (req.query.classroomId as string) || activeUser.classroomId || (classrooms[0]?.id || '');
   const userId = (req.query.userId as string) || activeUser.id;
 
+  if (classroomId) {
+    ensureCohortGeneralGroup(classroomId);
+  }
+
   try {
     const dbGrps = await dbFetchChatGroups(classroomId);
     if (dbGrps && dbGrps.length > 0) {
@@ -1906,6 +2215,15 @@ app.get('/api/chat/groups', async (req, res) => {
     console.warn('Supabase fetch chat groups warning:', err);
   }
 
+  // Auto-heal membership for all groups relevant to user
+  chatGroups.forEach((g) => {
+    if (g.isDirect && g.id.includes(userId)) {
+      isUserMemberOfGroup(g.id, userId);
+    } else if ((g as any).memberIds && Array.isArray((g as any).memberIds) && (g as any).memberIds.includes(userId)) {
+      isUserMemberOfGroup(g.id, userId);
+    }
+  });
+
   // Find all groups where userId is a member
   const userMemberships = chatGroupMembers.filter((m) => m.userId === userId);
   const userGroupIds = new Set(userMemberships.map((m) => m.groupId));
@@ -1924,7 +2242,8 @@ app.get('/api/chat/groups', async (req, res) => {
       if (g.isDirect) {
         const otherMemberId = memberIds.find((id) => id !== userId) || userId;
         const otherProfile = getMemberProfile(otherMemberId);
-        displayName = otherProfile.name;
+        const nickname = getFriendNickname(userId, otherMemberId);
+        displayName = nickname || otherProfile.name;
         displayAvatar = otherProfile.avatar;
       }
 
@@ -1949,6 +2268,7 @@ app.get('/api/chat/groups', async (req, res) => {
         createdBy: g.createdBy,
         adminIds,
         memberIds,
+        bannedUserIds: g.bannedUserIds || [],
         createdAt: g.createdAt,
         unreadCount,
         lastMessage: lastMsg
@@ -2034,7 +2354,7 @@ app.post('/api/chat/groups', async (req, res) => {
     });
   });
 
-  // Save to Supabase
+  // Save to Supabase and local cache
   dbSaveChatGroup({
     id: newGroup.id,
     classroomId: newGroup.classroomId,
@@ -2047,6 +2367,7 @@ app.post('/api/chat/groups', async (req, res) => {
     memberIds: [activeUser.id, ...uniqueMemberIds],
     createdAt: newGroup.createdAt,
   } as any).catch((e) => console.warn('Supabase save chat group warning:', e));
+  saveLocalCache();
 
   // Add system welcome message
   const welcomeMsg: ChatMessageRecord = {
@@ -2063,6 +2384,8 @@ app.post('/api/chat/groups', async (req, res) => {
     readBy: [activeUser.id],
   };
   chatMessages.push(welcomeMsg);
+  dbSaveChatMessage(welcomeMsg as any).catch((e) => console.warn('Supabase save welcome msg warning:', e));
+  saveLocalCache();
 
   // Broadcast to all newly added members
   broadcastToGroup(groupId, {
@@ -2094,32 +2417,40 @@ app.post('/api/chat/direct', (req, res) => {
   }
 
   const effectiveClassroomId = classroomId || activeUser.classroomId || (classrooms[0]?.id || '');
+  const expectedDmId = `dm-${[activeUser.id, targetUserId].sort().join('-')}`;
 
   // Check if a direct chat between these two already exists
-  const myDms = chatGroupMembers
-    .filter((m) => m.userId === activeUser.id)
-    .map((m) => m.groupId);
+  let existingGroup = chatGroups.find(
+    (g) => g.id === expectedDmId || (g.isDirect && g.id.includes(activeUser.id) && g.id.includes(targetUserId))
+  );
 
-  let existingGroupId: string | null = null;
-  for (const gid of myDms) {
-    const grp = chatGroups.find((g) => g.id === gid && g.isDirect);
-    if (grp) {
-      const otherMember = chatGroupMembers.find(
-        (m) => m.groupId === gid && m.userId === targetUserId
-      );
-      if (otherMember) {
-        existingGroupId = gid;
-        break;
+  if (!existingGroup) {
+    const myDms = chatGroupMembers
+      .filter((m) => m.userId === activeUser.id)
+      .map((m) => m.groupId);
+
+    for (const gid of myDms) {
+      const grp = chatGroups.find((g) => g.id === gid && g.isDirect);
+      if (grp) {
+        const otherMember = chatGroupMembers.find(
+          (m) => m.groupId === gid && m.userId === targetUserId
+        );
+        if (otherMember) {
+          existingGroup = grp;
+          break;
+        }
       }
     }
   }
 
-  if (existingGroupId) {
-    const grp = chatGroups.find((g) => g.id === existingGroupId)!;
+  if (existingGroup) {
+    isUserMemberOfGroup(existingGroup.id, activeUser.id);
+    isUserMemberOfGroup(existingGroup.id, targetUserId);
     const targetUser = getMemberProfile(targetUserId);
+    const nickname = getFriendNickname(activeUser.id, targetUserId);
     return res.json({
-      ...grp,
-      name: targetUser.name,
+      ...existingGroup,
+      name: nickname || targetUser.name,
       avatar: targetUser.avatar,
       adminIds: [activeUser.id, targetUserId],
       memberIds: [activeUser.id, targetUserId],
@@ -2127,8 +2458,9 @@ app.post('/api/chat/direct', (req, res) => {
   }
 
   // Create new Direct Chat
-  const newDmId = `dm-${[activeUser.id, targetUserId].sort().join('-')}`;
+  const newDmId = expectedDmId;
   const targetUser = getMemberProfile(targetUserId);
+  const nickname = getFriendNickname(activeUser.id, targetUserId);
 
   const newDm: ChatGroupRecord = {
     id: newDmId,
@@ -2140,6 +2472,7 @@ app.post('/api/chat/direct', (req, res) => {
     createdBy: activeUser.id,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    bannedUserIds: [],
   };
 
   chatGroups.push(newDm);
@@ -2156,9 +2489,35 @@ app.post('/api/chat/direct', (req, res) => {
     joinedAt: new Date().toISOString(),
   });
 
+  dbSaveChatGroup({
+    id: newDm.id,
+    classroomId: newDm.classroomId,
+    name: newDm.name,
+    avatar: newDm.avatar,
+    description: newDm.description,
+    isDirect: true,
+    createdBy: newDm.createdBy,
+    adminIds: [activeUser.id, targetUserId],
+    memberIds: [activeUser.id, targetUserId],
+    createdAt: newDm.createdAt,
+  } as any).catch((e) => console.warn('Supabase save direct chat group warning:', e));
+  saveLocalCache();
+
+  // Broadcast to target user and active user
+  for (const [clientWs, client] of connectedSockets.entries()) {
+    if (clientWs.readyState === WebSocket.OPEN && (client.userId === activeUser.id || client.userId === targetUserId)) {
+      clientWs.send(
+        JSON.stringify({
+          type: 'chat:group_created',
+          group: newDm,
+        })
+      );
+    }
+  }
+
   res.status(201).json({
     ...newDm,
-    name: targetUser.name,
+    name: nickname || targetUser.name,
     avatar: targetUser.avatar,
     adminIds: [activeUser.id, targetUserId],
     memberIds: [activeUser.id, targetUserId],
@@ -2167,17 +2526,46 @@ app.post('/api/chat/direct', (req, res) => {
 
 // 4. Get Group Info with Full Member List (Roles & Real-Time Presence)
 app.get('/api/chat/groups/:id', (req, res) => {
-  const group = chatGroups.find((g) => g.id === req.params.id);
+  const activeUser = getCurrentOrReqUser(req);
+  let group = chatGroups.find((g) => g.id === req.params.id);
+
+  // If DM not found in memory, try auto-reconstructing from ID
+  if (!group && req.params.id.startsWith('dm-')) {
+    const userIds = req.params.id.replace('dm-', '').split('-');
+    if (userIds.includes(activeUser.id)) {
+      const otherUserId = userIds.find((id) => id !== activeUser.id) || activeUser.id;
+      const otherProfile = getMemberProfile(otherUserId);
+      group = {
+        id: req.params.id,
+        classroomId: activeUser.classroomId || classrooms[0]?.id || '',
+        name: otherProfile.name,
+        avatar: otherProfile.avatar,
+        description: 'Direct Message',
+        isDirect: true,
+        createdBy: activeUser.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        bannedUserIds: [],
+      };
+      chatGroups.push(group);
+      userIds.forEach((uid) => isUserMemberOfGroup(group!.id, uid));
+      saveLocalCache();
+    }
+  }
+
   if (!group) {
     return res.status(404).json({ error: 'Group not found' });
   }
 
+  isUserMemberOfGroup(group.id, activeUser.id);
+
   const memberRecords = chatGroupMembers.filter((m) => m.groupId === group.id);
   const populatedMembers = memberRecords.map((rec) => {
     const profile = getMemberProfile(rec.userId);
+    const nickname = getFriendNickname(activeUser.id, rec.userId);
     return {
       userId: rec.userId,
-      name: profile.name,
+      name: nickname || profile.name,
       email: profile.email,
       avatar: profile.avatar,
       role: rec.role,
@@ -2187,8 +2575,20 @@ app.get('/api/chat/groups/:id', (req, res) => {
     };
   });
 
+  let displayName = group.name;
+  let displayAvatar = group.avatar;
+  if (group.isDirect) {
+    const otherMemberId = memberRecords.map((m) => m.userId).find((id) => id !== activeUser.id) || activeUser.id;
+    const otherProfile = getMemberProfile(otherMemberId);
+    const nickname = getFriendNickname(activeUser.id, otherMemberId);
+    displayName = nickname || otherProfile.name;
+    displayAvatar = otherProfile.avatar;
+  }
+
   res.json({
     ...group,
+    name: displayName,
+    avatar: displayAvatar,
     adminIds: memberRecords.filter((m) => m.role === 'admin').map((m) => m.userId),
     memberIds: memberRecords.map((m) => m.userId),
     members: populatedMembers,
@@ -2216,6 +2616,21 @@ app.patch('/api/chat/groups/:id', (req, res) => {
   if (avatar && avatar.trim()) group.avatar = avatar.trim();
   if (typeof description === 'string') group.description = description.trim();
   group.updatedAt = new Date().toISOString();
+
+  dbSaveChatGroup({
+    id: group.id,
+    classroomId: group.classroomId,
+    name: group.name,
+    avatar: group.avatar,
+    description: group.description,
+    isDirect: group.isDirect,
+    createdBy: group.createdBy,
+    adminIds: chatGroupMembers.filter((m) => m.groupId === group.id && m.role === 'admin').map((m) => m.userId),
+    memberIds: chatGroupMembers.filter((m) => m.groupId === group.id).map((m) => m.userId),
+    bannedUserIds: group.bannedUserIds || [],
+    createdAt: group.createdAt,
+  } as any).catch((e) => console.warn('Supabase update chat group warning:', e));
+  saveLocalCache();
 
   broadcastToGroup(group.id, {
     type: 'chat:group_updated',
@@ -2248,10 +2663,13 @@ app.delete('/api/chat/groups/:id', (req, res) => {
     groupId: group.id,
   });
 
+  dbDeleteChatGroup(group.id).catch((e) => console.warn('Supabase delete chat group warning:', e));
+
   // Cascade delete group, members, and messages
   chatGroups.splice(groupIndex, 1);
   chatGroupMembers = chatGroupMembers.filter((m) => m.groupId !== group.id);
   chatMessages = chatMessages.filter((m) => m.groupId !== group.id);
+  saveLocalCache();
 
   res.json({ success: true, message: 'Group deleted successfully' });
 });
@@ -2287,6 +2705,8 @@ app.post('/api/chat/groups/:id/members', (req, res) => {
     }
   });
 
+  saveLocalCache();
+
   if (added.length > 0) {
     broadcastToGroup(group.id, {
       type: 'chat:members_added',
@@ -2320,6 +2740,7 @@ app.delete('/api/chat/groups/:id/members/:userId', (req, res) => {
   chatGroupMembers = chatGroupMembers.filter(
     (m) => !(m.groupId === group.id && m.userId === targetUserId)
   );
+  saveLocalCache();
 
   broadcastToGroup(group.id, {
     type: 'chat:member_removed',
@@ -2367,6 +2788,7 @@ app.post('/api/chat/groups/:id/members/:userId/ban', (req, res) => {
   if (!group.bannedUserIds.includes(targetUserId)) {
     group.bannedUserIds.push(targetUserId);
   }
+  saveLocalCache();
 
   broadcastToGroup(group.id, {
     type: 'chat:member_banned',
@@ -2409,6 +2831,7 @@ app.patch('/api/chat/groups/:id/members/:userId/role', (req, res) => {
   }
 
   targetMember.role = role;
+  saveLocalCache();
 
   broadcastToGroup(group.id, {
     type: 'chat:role_changed',
@@ -2439,21 +2862,24 @@ app.get('/api/chat/groups/:id/messages', async (req, res) => {
     console.warn('Supabase fetch chat messages warning:', err);
   }
 
-  // Verify caller is a member of this group
-  const isMember = chatGroupMembers.some(
-    (m) => m.groupId === groupId && m.userId === activeUser.id
-  );
+  // Verify caller is a member of this group (with auto-healing)
+  const isMember = isUserMemberOfGroup(groupId, activeUser.id);
   if (!isMember) {
     return res.status(403).json({ error: 'Access denied: You are not a member of this conversation' });
   }
 
   // Mark delivered to activeUser
   const groupMsgs = chatMessages.filter((m) => m.groupId === groupId);
+  let changed = false;
   groupMsgs.forEach((m) => {
     if (!m.deliveredTo.includes(activeUser.id)) {
       m.deliveredTo.push(activeUser.id);
+      changed = true;
     }
   });
+  if (changed) {
+    saveLocalCache();
+  }
 
   res.json(groupMsgs);
 });
@@ -2462,9 +2888,45 @@ app.get('/api/chat/groups/:id/messages', async (req, res) => {
 app.post('/api/chat/groups/:id/messages', (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const groupId = req.params.id;
-  const isMember = chatGroupMembers.some(
-    (m) => m.groupId === groupId && m.userId === activeUser.id
-  );
+
+  // Auto-instantiate DM if missing in memory
+  let group = chatGroups.find((g) => g.id === groupId);
+  if (!group && groupId.startsWith('dm-')) {
+    const userIds = groupId.replace('dm-', '').split('-');
+    if (userIds.includes(activeUser.id)) {
+      const otherUserId = userIds.find((id) => id !== activeUser.id) || activeUser.id;
+      const otherProfile = getMemberProfile(otherUserId);
+      group = {
+        id: groupId,
+        classroomId: activeUser.classroomId || classrooms[0]?.id || '',
+        name: otherProfile.name,
+        avatar: otherProfile.avatar,
+        description: 'Direct Message',
+        isDirect: true,
+        createdBy: activeUser.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        bannedUserIds: [],
+      };
+      chatGroups.push(group);
+      userIds.forEach((uid) => isUserMemberOfGroup(groupId, uid));
+      dbSaveChatGroup({
+        id: group.id,
+        classroomId: group.classroomId,
+        name: group.name,
+        avatar: group.avatar,
+        description: group.description,
+        isDirect: true,
+        createdBy: group.createdBy,
+        adminIds: userIds,
+        memberIds: userIds,
+        createdAt: group.createdAt,
+      } as any).catch(() => {});
+      saveLocalCache();
+    }
+  }
+
+  const isMember = isUserMemberOfGroup(groupId, activeUser.id);
   if (!isMember) {
     return res.status(403).json({ error: 'Cannot send message to a group you do not belong to' });
   }
@@ -2500,11 +2962,14 @@ app.post('/api/chat/groups/:id/messages', (req, res) => {
 
   chatMessages.push(newMsg);
   dbSaveChatMessage(newMsg as any).catch((e) => console.warn('Supabase save chat message warning:', e));
+  saveLocalCache();
 
   // Update group timestamp
-  const group = chatGroups.find((g) => g.id === groupId);
   if (group) {
     group.updatedAt = new Date().toISOString();
+  } else {
+    const grp = chatGroups.find((g) => g.id === groupId);
+    if (grp) grp.updatedAt = new Date().toISOString();
   }
 
   // Instant broadcast via WebSocket
@@ -2543,6 +3008,7 @@ app.post('/api/chat/messages/:id/react', (req, res) => {
   }
 
   dbUpdateChatMessage(msg.id, { reactions: msg.reactions }).catch((e) => console.warn('Supabase update reactions warning:', e));
+  saveLocalCache();
 
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_reaction',
@@ -2579,6 +3045,7 @@ app.post('/api/chat/messages/:id/pin', (req, res) => {
   }
 
   dbUpdateChatMessage(msg.id, { isPinned: msg.isPinned }).catch((e) => console.warn('Supabase update pin warning:', e));
+  saveLocalCache();
 
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_pinned',
@@ -2610,6 +3077,7 @@ app.post('/api/chat/messages/:id/star', (req, res) => {
   msg.isStarred = isStarred;
 
   dbUpdateChatMessage(msg.id, { isStarred: msg.isStarred, starredBy: msg.starredBy }).catch((e) => console.warn('Supabase update star warning:', e));
+  saveLocalCache();
 
   res.json({ success: true, isStarred, messageId: msg.id });
 });
@@ -2629,9 +3097,7 @@ app.post('/api/chat/messages/forward', (req, res) => {
   const createdMsgs: ChatMessageRecord[] = [];
 
   for (const tGroupId of targetGroupIds) {
-    const isMember = chatGroupMembers.some(
-      (m) => m.groupId === tGroupId && m.userId === activeUser.id
-    );
+    const isMember = isUserMemberOfGroup(tGroupId, activeUser.id);
     if (!isMember) continue;
 
     const fwdMsg: ChatMessageRecord = {
@@ -2654,6 +3120,7 @@ app.post('/api/chat/messages/forward', (req, res) => {
 
     chatMessages.push(fwdMsg);
     createdMsgs.push(fwdMsg);
+    dbSaveChatMessage(fwdMsg as any).catch((e) => console.warn('Supabase save fwd msg warning:', e));
 
     const grp = chatGroups.find((g) => g.id === tGroupId);
     if (grp) grp.updatedAt = new Date().toISOString();
@@ -2665,6 +3132,7 @@ app.post('/api/chat/messages/forward', (req, res) => {
     });
   }
 
+  saveLocalCache();
   res.json({ success: true, forwardedCount: createdMsgs.length });
 });
 
@@ -2725,6 +3193,7 @@ app.post('/api/chat/materials/forward', (req, res) => {
           createdBy: activeUser.id,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          bannedUserIds: [],
         };
 
         chatGroups.push(newDm);
@@ -2740,6 +3209,26 @@ app.post('/api/chat/materials/forward', (req, res) => {
           role: 'admin',
           joinedAt: new Date().toISOString(),
         });
+
+        dbSaveChatGroup({
+          id: newDm.id,
+          classroomId: newDm.classroomId,
+          name: newDm.name,
+          avatar: newDm.avatar,
+          description: newDm.description,
+          isDirect: true,
+          createdBy: newDm.createdBy,
+          adminIds: [activeUser.id, targetUserId],
+          memberIds: [activeUser.id, targetUserId],
+          createdAt: newDm.createdAt,
+        } as any).catch(() => {});
+
+        // Broadcast new DM to target user
+        for (const [clientWs, client] of connectedSockets.entries()) {
+          if (clientWs.readyState === WebSocket.OPEN && client.userId === targetUserId) {
+            clientWs.send(JSON.stringify({ type: 'chat:group_created', group: newDm }));
+          }
+        }
 
         resolvedGroupIds.add(newDmId);
       }
@@ -2766,9 +3255,7 @@ app.post('/api/chat/materials/forward', (req, res) => {
   };
 
   for (const tGroupId of resolvedGroupIds) {
-    const isMember = chatGroupMembers.some(
-      (m) => m.groupId === tGroupId && m.userId === activeUser.id
-    );
+    const isMember = isUserMemberOfGroup(tGroupId, activeUser.id);
     if (!isMember) continue;
 
     const fwdMsg: ChatMessageRecord = {
@@ -2788,6 +3275,7 @@ app.post('/api/chat/materials/forward', (req, res) => {
 
     chatMessages.push(fwdMsg);
     createdMsgs.push(fwdMsg);
+    dbSaveChatMessage(fwdMsg as any).catch((e) => console.warn('Supabase save fwd material warning:', e));
 
     const grp = chatGroups.find((g) => g.id === tGroupId);
     if (grp) {
@@ -2801,6 +3289,7 @@ app.post('/api/chat/materials/forward', (req, res) => {
     });
   }
 
+  saveLocalCache();
   res.json({
     success: true,
     forwardedCount: createdMsgs.length,
@@ -2834,6 +3323,7 @@ app.delete('/api/chat/messages/:id', (req, res) => {
     isDeleted: true,
     content: 'This message was deleted',
   }).catch((e) => console.warn('Supabase update delete message warning:', e));
+  saveLocalCache();
 
   broadcastToGroup(msg.groupId, {
     type: 'chat:message_deleted',
@@ -2859,6 +3349,8 @@ app.post('/api/chat/groups/:id/read', (req, res) => {
     }
   });
 
+  saveLocalCache();
+
   broadcastToGroup(groupId, {
     type: 'chat:read_receipt',
     groupId,
@@ -2870,35 +3362,47 @@ app.post('/api/chat/groups/:id/read', (req, res) => {
 
 // 18. Update Current User Profile (Name and Avatar)
 app.patch('/api/users/profile', (req, res) => {
+  const activeUser = getCurrentOrReqUser(req);
   const { name, avatar } = req.body;
-  if (!currentUser) {
+  if (!activeUser || !activeUser.id) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
-  if (name && typeof name === 'string' && name.trim()) {
-    currentUser.name = name.trim();
+
+  const trimmedName = name && typeof name === 'string' && name.trim() ? name.trim() : activeUser.name;
+  const trimmedAvatar = avatar && typeof avatar === 'string' && avatar.trim() ? avatar.trim() : activeUser.avatar;
+
+  activeUser.name = trimmedName;
+  activeUser.avatar = trimmedAvatar;
+
+  if (currentUser && currentUser.id === activeUser.id) {
+    currentUser.name = trimmedName;
+    currentUser.avatar = trimmedAvatar;
   }
-  if (avatar && typeof avatar === 'string' && avatar.trim()) {
-    currentUser.avatar = avatar.trim();
-  }
+
   // Update in registeredUsers
-  const reg = registeredUsers.find((u) => u.id === currentUser.id);
+  const reg = registeredUsers.find((u) => u.id === activeUser.id);
   if (reg) {
-    if (name && typeof name === 'string' && name.trim()) reg.name = name.trim();
-    if (avatar && typeof avatar === 'string' && avatar.trim()) reg.avatar = avatar.trim();
+    reg.name = trimmedName;
+    reg.avatar = trimmedAvatar;
   }
+
   // Update in members
-  const mem = members.find((m) => m.id === currentUser.id);
+  const mem = members.find((m) => m.id === activeUser.id);
   if (mem) {
-    if (name && typeof name === 'string' && name.trim()) mem.name = name.trim();
-    if (avatar && typeof avatar === 'string' && avatar.trim()) mem.avatar = avatar.trim();
+    mem.name = trimmedName;
+    mem.avatar = trimmedAvatar;
+    dbSaveMember(mem).catch(() => {});
   }
+
   // Update messages sent by current user
   chatMessages.forEach((m) => {
-    if (m.senderId === currentUser.id) {
-      if (name && typeof name === 'string' && name.trim()) m.senderName = name.trim();
-      if (avatar && typeof avatar === 'string' && avatar.trim()) m.senderAvatar = avatar.trim();
+    if (m.senderId === activeUser.id) {
+      m.senderName = trimmedName;
+      m.senderAvatar = trimmedAvatar;
     }
   });
+
+  saveLocalCache();
 
   // Broadcast user update to all active clients
   for (const [clientWs] of connectedSockets.entries()) {
@@ -2906,19 +3410,20 @@ app.patch('/api/users/profile', (req, res) => {
       clientWs.send(
         JSON.stringify({
           type: 'chat:user_profile_updated',
-          userId: currentUser.id,
-          name: currentUser.name,
-          avatar: currentUser.avatar,
+          userId: activeUser.id,
+          name: trimmedName,
+          avatar: trimmedAvatar,
         })
       );
     }
   }
 
-  res.json({ success: true, user: currentUser });
+  res.json({ success: true, user: activeUser });
 });
 
-// 19. Rename Friend / Contact (Change ONLY friend's name in direct chat)
+// 19. Rename Friend / Contact (Scoped to viewer, does NOT modify target user's global profile)
 app.patch('/api/chat/friend-name', (req, res) => {
+  const activeUser = getCurrentOrReqUser(req);
   const { targetUserId, name, groupId } = req.body;
   if (!targetUserId || !name || !name.trim()) {
     return res.status(400).json({ error: 'Target user ID and new name are required' });
@@ -2926,36 +3431,12 @@ app.patch('/api/chat/friend-name', (req, res) => {
 
   const newName = name.trim();
 
-  // Update in registeredUsers
-  const reg = registeredUsers.find((u) => u.id === targetUserId);
-  if (reg) {
-    reg.name = newName;
-  }
+  // Save nickname scoped to viewer
+  setFriendNickname(activeUser.id, targetUserId, newName);
 
-  // Update in members
-  const mem = members.find((m) => m.id === targetUserId);
-  if (mem) {
-    mem.name = newName;
-  }
-
-  // If direct group, update the direct chat group record name if stored
-  if (groupId) {
-    const grp = chatGroups.find((g) => g.id === groupId);
-    if (grp && grp.isDirect) {
-      grp.name = newName;
-    }
-  }
-
-  // Update all messages from this friend so their bubble sender name updates
-  chatMessages.forEach((m) => {
-    if (m.senderId === targetUserId) {
-      m.senderName = newName;
-    }
-  });
-
-  // Broadcast friend name update
-  for (const [clientWs] of connectedSockets.entries()) {
-    if (clientWs.readyState === WebSocket.OPEN) {
+  // Send update to the viewer's sockets so UI refreshes immediately
+  for (const [clientWs, client] of connectedSockets.entries()) {
+    if (clientWs.readyState === WebSocket.OPEN && client.userId === activeUser.id) {
       clientWs.send(
         JSON.stringify({
           type: 'chat:friend_renamed',
