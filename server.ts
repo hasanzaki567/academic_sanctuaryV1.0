@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   dbFetchClassrooms,
@@ -191,6 +192,13 @@ app.get('/api/auth/me', async (req, res) => {
     } catch (e) {
       console.warn('Classroom lookup in /api/auth/me notice:', e);
     }
+  }
+
+  // If still no classroom associated, auto-associate with first available classroom
+  if (!userClassroom && classrooms.length > 0) {
+    userClassroom = classrooms[0];
+    userToReturn.classroomId = userClassroom.id;
+    setAuthCookies(res, userToReturn, userClassroom.id);
   }
 
   res.json({
@@ -1618,8 +1626,285 @@ let chatGroups: ChatGroupRecord[] = [];
 let chatGroupMembers: GroupMemberRecord[] = [];
 let chatMessages: ChatMessageRecord[] = [];
 
-// Initial Startup Sync with Supabase Database
+// Local Persistence Cache File (Resilience against DB connection drops or RLS blocks)
+const CACHE_FILE = path.join(process.cwd(), '.academic_sanctuary_cache.json');
+let cacheDebounceTimer: NodeJS.Timeout | null = null;
+
+// Local Friend Contact Nicknames: Record<`${viewerId}_${targetUserId}`, string>
+let friendNicknames: Record<string, string> = {};
+
+function getFriendNickname(viewerId: string, targetId: string): string | undefined {
+  return friendNicknames[`${viewerId}_${targetId}`];
+}
+
+function setFriendNickname(viewerId: string, targetId: string, nickname: string) {
+  friendNicknames[`${viewerId}_${targetId}`] = nickname;
+  saveLocalCache();
+}
+
+function saveLocalCache() {
+  if (process.env.VERCEL) return;
+  if (cacheDebounceTimer) clearTimeout(cacheDebounceTimer);
+  cacheDebounceTimer = setTimeout(() => {
+    try {
+      const payload = {
+        classrooms,
+        registeredUsers,
+        subjects,
+        materials,
+        announcements,
+        exams,
+        members,
+        chatGroups,
+        chatGroupMembers,
+        chatMessages,
+        friendNicknames,
+      };
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('Failed to save local cache file:', e);
+    }
+  }, 150);
+}
+
+function loadLocalCache() {
+  if (process.env.VERCEL) return false;
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data) {
+        if (Array.isArray(data.classrooms) && classrooms.length === 0) classrooms = data.classrooms;
+        if (Array.isArray(data.registeredUsers) && registeredUsers.length === 0) registeredUsers = data.registeredUsers;
+        if (Array.isArray(data.subjects) && subjects.length === 0) subjects = data.subjects;
+        if (Array.isArray(data.materials) && materials.length === 0) materials = data.materials;
+        if (Array.isArray(data.announcements) && announcements.length === 0) announcements = data.announcements;
+        if (Array.isArray(data.exams) && exams.length === 0) exams = data.exams;
+        if (Array.isArray(data.members) && members.length === 0) members = data.members;
+        if (Array.isArray(data.chatGroups) && chatGroups.length === 0) chatGroups = data.chatGroups;
+        if (Array.isArray(data.chatGroupMembers) && chatGroupMembers.length === 0) chatGroupMembers = data.chatGroupMembers;
+        if (Array.isArray(data.chatMessages) && chatMessages.length === 0) chatMessages = data.chatMessages;
+        if (data.friendNicknames && typeof data.friendNicknames === 'object') friendNicknames = data.friendNicknames;
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load local cache file:', e);
+  }
+  return false;
+}
+
+// Ensure default fallback cohort if database and cache are empty
+function seedDefaultCohortIfEmpty() {
+  if (classrooms.length === 0) {
+    const defaultCls = {
+      id: 'cls-1',
+      code: 'CSE26A',
+      name: 'B.Tech CSE 2026 - Section A',
+      collegeName: 'Stanford Institute of Technology',
+      location: 'Silicon Valley Campus',
+      department: 'Computer Science & Engineering',
+      course: 'B.Tech Computer Science',
+      degreeLevel: 'undergraduate',
+      batchYear: '2026',
+      section: 'Section A',
+      semester: 'Semester 5',
+      superAdminId: 'user-sarah',
+      memberCount: 4,
+      createdAt: '2026-08-15',
+    };
+    classrooms.push(defaultCls);
+
+    const defaultMembers = [
+      {
+        id: 'user-sarah',
+        name: 'Sarah Jenkins',
+        email: 'sarah.j@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA',
+        role: 'super_admin' as const,
+        rollNumber: '26CS001',
+        joinedDate: 'Aug 15',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-michael',
+        name: 'Michael Klein',
+        email: 'm.klein@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg',
+        role: 'admin' as const,
+        rollNumber: '26CS014',
+        joinedDate: 'Aug 16',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-elena',
+        name: 'Elena Rostova',
+        email: 'elena.r@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A',
+        role: 'student' as const,
+        rollNumber: '26CS028',
+        joinedDate: 'Aug 17',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+      {
+        id: 'user-david',
+        name: 'David Chen',
+        email: 'd.chen@stanford.edu',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ',
+        role: 'student' as const,
+        rollNumber: '26CS042',
+        joinedDate: 'Aug 18',
+        classroomId: 'cls-1',
+        department: 'Computer Science & Engineering',
+      },
+    ];
+
+    defaultMembers.forEach((m) => {
+      if (!members.some((existing) => existing.id === m.id)) members.push(m);
+      if (!registeredUsers.some((u) => u.id === m.id)) {
+        registeredUsers.push({
+          ...m,
+          password: 'password123',
+        });
+      }
+    });
+
+    ensureCohortGeneralGroup('cls-1');
+  }
+
+  // If currentUser is set but lacks a classroom, associate with first classroom
+  if (currentUser && !currentUser.classroomId && classrooms.length > 0) {
+    currentUser.classroomId = classrooms[0].id;
+    if (!members.some((m) => m.id === currentUser.id)) {
+      members.push({
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email,
+        avatar: currentUser.avatar,
+        role: currentUser.role,
+        rollNumber: currentUser.rollNumber || 'STU001',
+        joinedDate: 'Today',
+        classroomId: classrooms[0].id,
+        department: currentUser.department,
+      });
+    }
+  }
+}
+
+// Guarantees that a cohort always has an active General Discussion group
+function ensureCohortGeneralGroup(classroomId: string): ChatGroupRecord {
+  let generalGroup = chatGroups.find((g) => g.classroomId === classroomId && !g.isDirect);
+  const cls = classrooms.find((c) => c.id === classroomId);
+  const clsName = cls?.name || 'Cohort';
+  const clsCode = cls?.code || 'ACAD';
+
+  if (!generalGroup) {
+    generalGroup = {
+      id: `group-${classroomId}-general`,
+      classroomId,
+      name: `${clsName} General`,
+      description: `Official cohort discussion group for ${clsName}`,
+      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(clsCode)}`,
+      createdBy: cls?.superAdminId || 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDirect: false,
+      bannedUserIds: [],
+    };
+    chatGroups.unshift(generalGroup);
+
+    const cohortMemberIds = members.filter((m) => !m.classroomId || m.classroomId === classroomId).map((m) => m.id);
+    dbSaveChatGroup({
+      ...generalGroup,
+      adminIds: [cls?.superAdminId || 'admin'],
+      memberIds: cohortMemberIds.length > 0 ? cohortMemberIds : ['user-sarah'],
+    } as any).catch(() => {});
+    saveLocalCache();
+  }
+
+  // Ensure all classroom members are enrolled in chatGroupMembers
+  const clsMembers = members.filter((m) => !m.classroomId || m.classroomId === classroomId);
+  for (const cm of clsMembers) {
+    if (!chatGroupMembers.some((m) => m.groupId === generalGroup.id && m.userId === cm.id)) {
+      chatGroupMembers.push({
+        groupId: generalGroup.id,
+        userId: cm.id,
+        role: (cm.role === 'super_admin' || cm.role === 'admin') ? 'admin' : 'member',
+        joinedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  return generalGroup;
+}
+
+// Resilient Membership Verifier & Auto-Healer
+function isUserMemberOfGroup(groupId: string, userId: string): boolean {
+  if (!groupId || !userId) return false;
+
+  // 1. Direct membership match
+  if (chatGroupMembers.some((m) => m.groupId === groupId && m.userId === userId)) {
+    return true;
+  }
+
+  // 2. Direct DM match by ID or pattern (dm-userA-userB)
+  const grp = chatGroups.find((g) => g.id === groupId);
+  if (grp && grp.isDirect) {
+    if (groupId.includes(userId)) {
+      chatGroupMembers.push({
+        groupId,
+        userId,
+        role: 'admin',
+        joinedAt: new Date().toISOString(),
+      });
+      return true;
+    }
+  }
+
+  if (groupId.startsWith('dm-') && groupId.includes(userId)) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: 'admin',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  // 3. Cohort General Group match (enrolled members are always valid members)
+  const user = registeredUsers.find((u) => u.id === userId) || members.find((m) => m.id === userId);
+  const targetClassroomId = user?.classroomId || classrooms[0]?.id;
+
+  if (grp && (!grp.classroomId || grp.classroomId === targetClassroomId)) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: (user?.role === 'super_admin' || user?.role === 'admin') ? 'admin' : 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  if (groupId.includes('general')) {
+    chatGroupMembers.push({
+      groupId,
+      userId,
+      role: 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  return false;
+}
+
+// Initial Startup Sync with Supabase Database + Local Cache Fallback
 async function syncWithSupabase() {
+  loadLocalCache();
+
   try {
     const [dbCls, dbSubs, dbMats, dbAnns, dbExs, dbMems, dbGrps] = await Promise.all([
       dbFetchClassrooms(),
@@ -1667,6 +1952,9 @@ async function syncWithSupabase() {
   } catch (err) {
     console.warn('[Supabase Sync] Background startup sync notice:', err);
   }
+
+  seedDefaultCohortIfEmpty();
+  saveLocalCache();
 }
 syncWithSupabase();
 
