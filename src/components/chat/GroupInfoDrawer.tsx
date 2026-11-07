@@ -72,6 +72,14 @@ export const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
   const [description, setDescription] = useState(group.description || '');
   const [avatar, setAvatar] = useState(group.avatar);
 
+  React.useEffect(() => {
+    setName(group.name);
+    setDescription(group.description || '');
+    setAvatar(group.avatar);
+    setIsEditingName(false);
+    setIsEditingDesc(false);
+  }, [group.id, group.name, group.description, group.avatar]);
+
   // Search & Modals
   const [memberSearch, setMemberSearch] = useState('');
   const [avatarError, setAvatarError] = useState<string | null>(null);
