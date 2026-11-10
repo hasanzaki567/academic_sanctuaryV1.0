@@ -114,6 +114,7 @@ function rowToSubject(r) {
 function materialToRow(m) {
   return {
     id: m.id,
+    classroom_id: m.classroomId || null,
     subject_id: m.subjectId,
     subject_code: m.subjectCode,
     subject_name: m.subjectName,
@@ -138,6 +139,7 @@ function materialToRow(m) {
 function rowToMaterial(r, fallbackClassroomId) {
   return {
     id: r.id,
+    classroomId: r.classroom_id || fallbackClassroomId || void 0,
     subjectId: r.subject_id,
     subjectCode: r.subject_code,
     subjectName: r.subject_name,
@@ -269,7 +271,8 @@ function chatMessageToRow(m) {
     is_deleted: Boolean(m.isDeleted),
     is_pinned: Boolean(m.isPinned),
     is_starred: Boolean(m.isStarred),
-    starred_by: m.starredBy || []
+    starred_by: m.starredBy || [],
+    ...m.isEdited ? { is_edited: true, edited_at: m.editedAt ?? Date.now() } : {}
   };
 }
 function rowToChatMessage(r) {
@@ -294,7 +297,9 @@ function rowToChatMessage(r) {
     isDeleted: Boolean(r.is_deleted),
     isPinned: Boolean(r.is_pinned),
     isStarred: Boolean(r.is_starred),
-    starredBy: r.starred_by || []
+    starredBy: r.starred_by || [],
+    isEdited: Boolean(r.is_edited),
+    editedAt: r.edited_at ? Number(r.edited_at) : void 0
   };
 }
 async function dbFetchClassrooms() {
@@ -598,16 +603,29 @@ async function dbFetchChatMessages(groupId) {
     return [];
   }
 }
+async function withEditColumnsFallback(payload, execute, label) {
+  const { error } = await execute(payload);
+  if (!error) return true;
+  if (error.message?.includes("is_edited") || error.message?.includes("edited_at")) {
+    const { is_edited: _ie, edited_at: _ea, ...legacyPayload } = payload;
+    if (Object.keys(legacyPayload).length === 0) return true;
+    const retry = await execute(legacyPayload);
+    if (!retry.error) return true;
+    console.warn(`${label} warning:`, retry.error.message);
+    return false;
+  }
+  console.warn(`${label} warning:`, error.message);
+  return false;
+}
 async function dbSaveChatMessage(m) {
   try {
     const sb = getSupabase();
     const row = chatMessageToRow(m);
-    const { error } = await sb.from("chat_messages").upsert(row, { onConflict: "id" });
-    if (error) {
-      console.warn("dbSaveChatMessage warning:", error.message);
-      return false;
-    }
-    return true;
+    return await withEditColumnsFallback(
+      row,
+      (body) => sb.from("chat_messages").upsert(body, { onConflict: "id" }),
+      "dbSaveChatMessage"
+    );
   } catch (err) {
     console.warn("dbSaveChatMessage exception:", err);
     return false;
@@ -625,12 +643,14 @@ async function dbUpdateChatMessage(id, patch) {
     if (patch.deliveredTo !== void 0) rowPatch.delivered_to = patch.deliveredTo;
     if (patch.readBy !== void 0) rowPatch.read_by = patch.readBy;
     if (patch.isDeleted !== void 0) rowPatch.is_deleted = patch.isDeleted;
-    const { error } = await sb.from("chat_messages").update(rowPatch).eq("id", id);
-    if (error) {
-      console.warn("dbUpdateChatMessage warning:", error.message);
-      return false;
-    }
-    return true;
+    if (patch.isEdited !== void 0) rowPatch.is_edited = patch.isEdited;
+    if (patch.editedAt !== void 0) rowPatch.edited_at = patch.editedAt;
+    if (Object.keys(rowPatch).length === 0) return true;
+    return await withEditColumnsFallback(
+      rowPatch,
+      (body) => sb.from("chat_messages").update(body).eq("id", id),
+      "dbUpdateChatMessage"
+    );
   } catch (err) {
     console.warn("dbUpdateChatMessage exception:", err);
     return false;
@@ -659,14 +679,760 @@ server.on("upgrade", (request, socket, head) => {
     });
   }
 });
-var classrooms = [];
-var registeredUsers = [];
+function daysFromToday(offsetDays) {
+  const d = /* @__PURE__ */ new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().split("T")[0];
+}
+function mergeRecordsById(incoming, existing) {
+  const map = /* @__PURE__ */ new Map();
+  incoming.forEach((item) => map.set(item.id, item));
+  existing.forEach((item) => {
+    if (!map.has(item.id)) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+var classrooms = [
+  {
+    id: "cls-1",
+    code: "BTECH26A",
+    name: "B.Tech CSE 2026 - Section A",
+    collegeName: "Oxford University",
+    location: "Oxford, United Kingdom",
+    department: "Department of Computer Science & Engineering",
+    course: "B.Tech Computer Science & Engineering",
+    degreeLevel: "undergraduate",
+    batchYear: "2026",
+    section: "Section A",
+    semester: "Semester 5",
+    superAdminId: "user-sarah",
+    memberCount: 64,
+    createdAt: "2024-08-15"
+  },
+  {
+    id: "cls-2",
+    code: "AIDS26A",
+    name: "B.Tech AI & Data Science 2026",
+    collegeName: "Stanford University",
+    location: "Stanford, California, USA",
+    department: "School of Engineering & AI",
+    course: "B.Tech Artificial Intelligence",
+    degreeLevel: "undergraduate",
+    batchYear: "2026",
+    section: "Section A",
+    semester: "Semester 5",
+    superAdminId: "user-alex",
+    memberCount: 42,
+    createdAt: "2024-08-20"
+  }
+];
+var registeredUsers = [
+  {
+    id: "user-sarah",
+    name: "Sarah Jenkins",
+    email: "sarah.j@oxford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+    role: "super_admin",
+    department: "Computer Science",
+    rollNumber: "CS22B042",
+    classroomId: "cls-1"
+  },
+  {
+    id: "user-michael",
+    name: "Michael Klein",
+    email: "michael.k@oxford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg",
+    role: "admin",
+    department: "Computer Science",
+    rollNumber: "CS22B018",
+    classroomId: "cls-1"
+  },
+  {
+    id: "user-elena",
+    name: "Elena Rostova",
+    email: "elena.r@oxford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+    role: "student",
+    department: "Computer Science",
+    rollNumber: "CS22B029",
+    classroomId: "cls-1"
+  },
+  {
+    id: "user-david",
+    name: "David Chen",
+    email: "david.c@oxford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ",
+    role: "student",
+    department: "Computer Science",
+    rollNumber: "CS22B011",
+    classroomId: "cls-1"
+  },
+  {
+    id: "user-alex",
+    name: "Alex Turner",
+    email: "alex.t@stanford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A",
+    role: "super_admin",
+    department: "School of Engineering & AI",
+    rollNumber: "AI24B001",
+    classroomId: "cls-2"
+  },
+  {
+    id: "user-maya",
+    name: "Maya Lin",
+    email: "maya.l@stanford.edu",
+    password: "password123",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+    role: "student",
+    department: "School of Engineering & AI",
+    rollNumber: "AI24B014",
+    classroomId: "cls-2"
+  }
+];
 var currentUser = null;
-var subjects = [];
-var materials = [];
-var announcements = [];
-var exams = [];
-var members = [];
+var subjects = [
+  {
+    id: "sub-ds",
+    classroomId: "cls-1",
+    code: "CS301",
+    name: "Data Structures",
+    professor: "Prof. Alan Turing",
+    description: "Fundamental concepts of data organization, algorithms, and complexity analysis essential for efficient software development.",
+    creditHours: 4,
+    materialsCount: 4,
+    notesCount: 3,
+    pyqsCount: 1
+  },
+  {
+    id: "sub-os",
+    classroomId: "cls-1",
+    code: "CS302",
+    name: "Operating Systems",
+    professor: "Prof. A. Kumar",
+    description: "Concurrency, process management, memory virtualisation, file systems and distributed operating system architectures.",
+    creditHours: 4,
+    materialsCount: 1,
+    notesCount: 0,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-algo",
+    classroomId: "cls-1",
+    code: "CS303",
+    name: "Algorithm Analysis",
+    professor: "Dr. S. Gupta",
+    description: "Asymptotic notation, dynamic programming, divide-and-conquer, greedy heuristics, NP-completeness and graph algorithms.",
+    creditHours: 4,
+    materialsCount: 1,
+    notesCount: 1,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-cn",
+    classroomId: "cls-1",
+    code: "CS304",
+    name: "Computer Networks",
+    professor: "Dr. N. Singh",
+    description: "OSI & TCP/IP stack layers, routing protocols, flow and congestion control, socket programming and network security.",
+    creditHours: 3,
+    materialsCount: 1,
+    notesCount: 0,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-dbms",
+    classroomId: "cls-1",
+    code: "CS305",
+    name: "Database Management Systems",
+    professor: "Dr. E. Codd",
+    description: "Relational algebra, SQL schema normalization, indexing, ACID transactions and distributed NoSQL systems.",
+    creditHours: 4,
+    materialsCount: 1,
+    notesCount: 1,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-toc",
+    classroomId: "cls-1",
+    code: "CS306",
+    name: "Theory of Computation",
+    professor: "Prof. N. Chomsky",
+    description: "Automata theory, regular expressions, context-free grammars, Turing machines, decidability and computational complexity.",
+    creditHours: 3,
+    materialsCount: 1,
+    notesCount: 0,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-ml",
+    classroomId: "cls-2",
+    code: "AI301",
+    name: "Machine Learning Foundations",
+    professor: "Prof. Andrew Ng",
+    description: "Supervised and unsupervised learning, generalization bounds, gradient optimization, SVMs, and ensemble methods.",
+    creditHours: 4,
+    materialsCount: 2,
+    notesCount: 1,
+    pyqsCount: 1
+  },
+  {
+    id: "sub-dl",
+    classroomId: "cls-2",
+    code: "AI302",
+    name: "Deep Learning & Transformers",
+    professor: "Dr. Fei-Fei Li",
+    description: "Backpropagation, convolutional networks, sequence modeling, self-attention mechanisms, and modern LLM architectures.",
+    creditHours: 4,
+    materialsCount: 1,
+    notesCount: 0,
+    pyqsCount: 0
+  },
+  {
+    id: "sub-stat",
+    classroomId: "cls-2",
+    code: "AI303",
+    name: "Statistical Data Science",
+    professor: "Prof. T. Hastie",
+    description: "Bayesian inference, maximum likelihood estimation, hypothesis testing, and high-dimensional data analysis.",
+    creditHours: 3,
+    materialsCount: 0,
+    notesCount: 0,
+    pyqsCount: 0
+  }
+];
+var materials = [
+  {
+    id: "mat-1",
+    classroomId: "cls-1",
+    subjectId: "sub-ds",
+    subjectCode: "CS301",
+    subjectName: "Data Structures",
+    title: "Trees & Graphs Deep Dive",
+    description: "Comprehensive guide covering Binary Search Trees, AVL Trees, Red-Black Trees, Graph traversals (BFS/DFS), Dijkstra & A* shortest paths.",
+    type: "notes",
+    fileFormat: "PDF",
+    fileSize: "2.4 MB",
+    uploadedBy: {
+      id: "user-sarah",
+      name: "Sarah J.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+      role: "super_admin"
+    },
+    uploadedDate: "Aug 20, 2026",
+    createdAt: 17865e8,
+    downloadsCount: 142,
+    viewsCount: 389,
+    isVerified: true,
+    tags: ["Trees", "Graphs", "BFS/DFS", "AVL Trees"],
+    unit: "Unit 3 & 4",
+    recommendedExam: "SEM",
+    contentSnippet: "# Trees & Graphs Deep Dive\n\n## 1. Binary Search Trees (BST)\nA binary tree where every node in the left subtree has key <= node key, and right subtree has key > node key.\n\n### Balanced Trees\n- **AVL Trees**: Strict height balancing where balance factor BF = |h_L - h_R| <= 1.\n- **Rotations**: Single left (LL), single right (RR), double left-right (LR), double right-left (RL).\n\n## 2. Graph Algorithms\n- BFS: Uses Queue, O(V + E), shortest path in unweighted graphs.\n- DFS: Uses Stack / Recursion, cycle detection, topological sorting.\n- Dijkstra Algorithm: Greedy single-source shortest path with priority queue O((V + E) log V)."
+  },
+  {
+    id: "mat-2",
+    classroomId: "cls-1",
+    subjectId: "sub-ds",
+    subjectCode: "CS301",
+    subjectName: "Data Structures",
+    title: "Sorting Algorithms Summary & Cheat Sheet",
+    description: "Time & space complexity cheat sheet for Quicksort, Mergesort, Heapsort, Radix Sort, with stability analysis and edge-case code samples.",
+    type: "notes",
+    fileFormat: "PDF",
+    fileSize: "1.8 MB",
+    uploadedBy: {
+      id: "user-michael",
+      name: "Michael K.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg",
+      role: "admin"
+    },
+    uploadedDate: "Aug 24, 2026",
+    createdAt: 17868e8,
+    downloadsCount: 98,
+    viewsCount: 245,
+    isVerified: true,
+    tags: ["Sorting", "Complexity", "Quicksort", "Heapsort"],
+    unit: "Unit 2",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# Sorting Algorithms Quick Reference\n\n| Algorithm | Best | Average | Worst | Space | Stable? |\n|---|---|---|---|---|---|\n| Merge Sort | O(n log n) | O(n log n) | O(n log n) | O(n) | Yes |\n| Quick Sort | O(n log n) | O(n log n) | O(n^2) | O(log n) | No |\n| Heap Sort | O(n log n) | O(n log n) | O(n log n) | O(1) | No |\n| Insertion Sort | O(n) | O(n^2) | O(n^2) | O(1) | Yes |"
+  },
+  {
+    id: "mat-3",
+    classroomId: "cls-1",
+    subjectId: "sub-ds",
+    subjectCode: "CS301",
+    subjectName: "Data Structures",
+    title: "Midterm Review Notes & Solved Problems",
+    description: "Consolidated review questions and high-yield theorems for Midterm Exam 1. Includes solved problems from past 3 years.",
+    type: "notes",
+    fileFormat: "DOCX",
+    fileSize: "540 KB",
+    uploadedBy: {
+      id: "user-elena",
+      name: "Elena R.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+      role: "student"
+    },
+    uploadedDate: "Aug 28, 2026",
+    createdAt: 17871e8,
+    downloadsCount: 167,
+    viewsCount: 412,
+    isVerified: true,
+    tags: ["Midterm", "Exam Prep", "Formulas"],
+    unit: "Unit 1-3",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# Data Structures Midterm Review\n\n## Important Concepts Checklist:\n1. Array vs Linked List trade-offs in cache locality\n2. Stack applications (Infix to Postfix evaluation, Parentheses matching)\n3. Circular Queue implementation and modular arithmetic\n4. Hashing collision resolution (Chaining vs Open Addressing)"
+  },
+  {
+    id: "mat-4",
+    classroomId: "cls-1",
+    subjectId: "sub-os",
+    subjectCode: "CS302",
+    subjectName: "Operating Systems",
+    title: "Process Synchronization & Semaphores",
+    description: "Process Synchronization, Semaphores, Mutex Locks, Monitors, and Classic Synchronization Problems (Dining Philosophers, Readers-Writers).",
+    type: "materials",
+    fileFormat: "PDF",
+    fileSize: "3.1 MB",
+    uploadedBy: {
+      id: "user-sarah",
+      name: "Prof. A. Kumar",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+      role: "super_admin"
+    },
+    uploadedDate: "Aug 31, 2026",
+    createdAt: 17874e8,
+    downloadsCount: 215,
+    viewsCount: 520,
+    isVerified: true,
+    tags: ["Synchronization", "Semaphores", "Deadlocks"],
+    unit: "Chapter 4",
+    recommendedExam: "IAT 2",
+    contentSnippet: "# Process Synchronization\n\n## Critical Section Problem\nA code segment that accesses shared variables and must be executed atomically.\n\n### Requirements:\n1. Mutual Exclusion\n2. Progress\n3. Bounded Waiting\n\n### Semaphores\nInteger variable accessed only via atomic wait() [P] and signal() [V] operations."
+  },
+  {
+    id: "mat-5",
+    classroomId: "cls-1",
+    subjectId: "sub-algo",
+    subjectCode: "CS303",
+    subjectName: "Algorithm Analysis",
+    title: "Master Theorem & Divide and Conquer Recurrences",
+    description: "Master Theorem proofs, divide and conquer recurrences, amortized analysis with aggregate and potential method.",
+    type: "notes",
+    fileFormat: "DOCX",
+    fileSize: "1.2 MB",
+    uploadedBy: {
+      id: "user-michael",
+      name: "Michael K.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg",
+      role: "admin"
+    },
+    uploadedDate: "Sep 02, 2026",
+    createdAt: 17877e8,
+    downloadsCount: 180,
+    viewsCount: 390,
+    isVerified: true,
+    tags: ["Master Theorem", "Recurrences", "Amortized"],
+    unit: "Unit 1 & 2",
+    recommendedExam: "IAT 2",
+    contentSnippet: "# Master Theorem Guide\n\nFor recurrence: `T(n) = aT(n/b) + f(n)`\n\nCompare f(n) with n^(log_b a):\n1. If f(n) = O(n^(log_b a - epsilon)), then T(n) = Theta(n^(log_b a))\n2. If f(n) = Theta(n^(log_b a)), then T(n) = Theta(n^(log_b a) * log n)\n3. If f(n) = Omega(n^(log_b a + epsilon)), then T(n) = Theta(f(n))"
+  },
+  {
+    id: "mat-6",
+    classroomId: "cls-1",
+    subjectId: "sub-cn",
+    subjectCode: "CS304",
+    subjectName: "Computer Networks",
+    title: "OSI Model & Data Link Layer Lecture Slides",
+    description: "Physical & Data Link Layer fundamentals, framing, CRC error detection, Sliding Window Protocols and HDLC.",
+    type: "slides",
+    fileFormat: "PPTX",
+    fileSize: "4.5 MB",
+    uploadedBy: {
+      id: "user-michael",
+      name: "Dr. N. Singh",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ",
+      role: "admin"
+    },
+    uploadedDate: "Sep 04, 2026",
+    createdAt: 1788e9,
+    downloadsCount: 132,
+    viewsCount: 290,
+    isVerified: true,
+    tags: ["OSI Model", "Data Link", "CRC", "Sliding Window"],
+    unit: "Lecture 2",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# Computer Networks Lecture 2\n\n- Framing techniques: Character count, Byte stuffing, Bit stuffing\n- Cyclic Redundancy Check (CRC) polynomial division\n- Stop-and-Wait vs Go-Back-N vs Selective Repeat ARQ"
+  },
+  {
+    id: "mat-7",
+    classroomId: "cls-1",
+    subjectId: "sub-ds",
+    subjectCode: "CS301",
+    subjectName: "Data Structures",
+    title: "2023 Fall Midterm PYQ with Solutions",
+    description: "Official Previous Year Question paper from Fall 2023 with step-by-step verified solutions and grading rubrics.",
+    type: "pyqs",
+    fileFormat: "PDF",
+    fileSize: "3.4 MB",
+    uploadedBy: {
+      id: "user-sarah",
+      name: "Sarah J.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+      role: "super_admin"
+    },
+    uploadedDate: "Sep 05, 2026",
+    createdAt: 17883e8,
+    downloadsCount: 310,
+    viewsCount: 650,
+    isVerified: true,
+    tags: ["PYQ", "2023", "Solved Paper"],
+    unit: "Past Exam",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# 2023 Fall Midterm Exam Solutions\n\n### Q1: Construct an AVL tree by inserting [15, 20, 24, 10, 13, 7, 30, 36, 25]\nSolution: Shows step-by-step tree drawings and rotation triggers.\n\n### Q2: Prove that Dijkstra does not work for negative edge weights.\nSolution: Counterexample graph with 3 vertices."
+  },
+  {
+    id: "mat-8",
+    classroomId: "cls-1",
+    subjectId: "sub-dbms",
+    subjectCode: "CS305",
+    subjectName: "Database Management Systems",
+    title: "SQL, Normalization & ACID Transactions Sheet",
+    description: "BCNF vs 3NF decomposition algorithms, serializability testing with precedence graphs, and 2-phase locking protocol.",
+    type: "notes",
+    fileFormat: "PDF",
+    fileSize: "3.0 MB",
+    uploadedBy: {
+      id: "user-david",
+      name: "David C.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ",
+      role: "student"
+    },
+    uploadedDate: "Sep 04, 2026",
+    createdAt: 17881e8,
+    downloadsCount: 240,
+    viewsCount: 510,
+    isVerified: true,
+    tags: ["BCNF", "Normalization", "ACID", "Transactions"],
+    unit: "Unit 3 & 4",
+    recommendedExam: "IAT 2",
+    contentSnippet: "# Database Normalization & Transactions\n\n## Normal Forms:\n- 1NF: Atomic attribute values\n- 2NF: 1NF + No partial dependencies\n- 3NF: 2NF + No transitive dependencies (X -> A implies X is superkey OR A is prime attribute)\n- BCNF: X -> A implies X is superkey\n\n## ACID Properties:\n- Atomicity (All or nothing)\n- Consistency (Preserves database integrity)\n- Isolation (Concurrent transactions do not interfere)\n- Durability (Committed updates persist)"
+  },
+  {
+    id: "mat-9",
+    classroomId: "cls-1",
+    subjectId: "sub-toc",
+    subjectCode: "CS306",
+    subjectName: "Theory of Computation",
+    title: "Pumping Lemma, CFG & Turing Machine High-Yield Questions",
+    description: "Curated important exam questions covering DFA/NFA minimization, Pumping Lemma proofs, Pushdown Automata, and Undecidability.",
+    type: "important_questions",
+    fileFormat: "PDF",
+    fileSize: "1.6 MB",
+    uploadedBy: {
+      id: "user-sarah",
+      name: "Sarah J.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+      role: "super_admin"
+    },
+    uploadedDate: "Sep 06, 2026",
+    createdAt: 17885e8,
+    downloadsCount: 194,
+    viewsCount: 430,
+    isVerified: true,
+    tags: ["Automata", "Pumping Lemma", "Turing Machines", "Important"],
+    unit: "Unit 1-4",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# Theory of Computation High-Yield Questions\n\n1. Prove L = { a^n b^n c^n | n >= 1 } is not context-free using the Pumping Lemma for CFLs.\n2. Convert the given NFA with epsilon-transitions into an equivalent minimized DFA.\n3. Show that the Halting Problem HALT_TM is undecidable via reduction from A_TM."
+  },
+  {
+    id: "mat-10",
+    classroomId: "cls-2",
+    subjectId: "sub-ml",
+    subjectCode: "AI301",
+    subjectName: "Machine Learning Foundations",
+    title: "Gradient Descent, Regularization & Bias-Variance Tradeoff",
+    description: "Complete lecture notes on L1/L2 regularization, SGD with momentum, Adam optimizer, cross-validation, and generalization bounds.",
+    type: "notes",
+    fileFormat: "PDF",
+    fileSize: "2.7 MB",
+    uploadedBy: {
+      id: "user-alex",
+      name: "Alex T.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A",
+      role: "super_admin"
+    },
+    uploadedDate: "Sep 01, 2026",
+    createdAt: 17876e8,
+    downloadsCount: 158,
+    viewsCount: 342,
+    isVerified: true,
+    tags: ["Gradient Descent", "Regularization", "Bias-Variance"],
+    unit: "Unit 1 & 2",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# Machine Learning Foundations\n\n## Bias-Variance Decomposition\nExpected MSE = Bias^2 + Variance + Irreducible Noise.\n\n- **L2 (Ridge)**: Penalizes sum of squared weights; shrinks parameters smoothly.\n- **L1 (Lasso)**: Penalizes sum of absolute weights; induces sparsity for feature selection."
+  },
+  {
+    id: "mat-11",
+    classroomId: "cls-2",
+    subjectId: "sub-dl",
+    subjectCode: "AI302",
+    subjectName: "Deep Learning & Transformers",
+    title: "Transformers, Multi-Head Attention & Positional Encoding Slides",
+    description: "Annotated lecture slides covering scaled dot-product attention, causal masking, layer normalization, and encoder-decoder architectures.",
+    type: "slides",
+    fileFormat: "PPTX",
+    fileSize: "5.1 MB",
+    uploadedBy: {
+      id: "user-alex",
+      name: "Alex T.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A",
+      role: "super_admin"
+    },
+    uploadedDate: "Sep 05, 2026",
+    createdAt: 17882e8,
+    downloadsCount: 204,
+    viewsCount: 475,
+    isVerified: true,
+    tags: ["Transformers", "Attention", "Deep Learning"],
+    unit: "Module 3",
+    recommendedExam: "IAT 2",
+    contentSnippet: "# Attention Is All You Need\n\n`Attention(Q, K, V) = softmax((Q K^T) / sqrt(d_k)) V`\n\n- Scaling by `1/sqrt(d_k)` prevents softmax saturation in high dimensions.\n- Multi-head attention projects queries, keys, and values into `h` parallel subspaces."
+  },
+  {
+    id: "mat-12",
+    classroomId: "cls-2",
+    subjectId: "sub-ml",
+    subjectCode: "AI301",
+    subjectName: "Machine Learning Foundations",
+    title: "2025 Fall ML Midterm PYQ with Worked Solutions",
+    description: "Previous year midterm paper with derivations for Logistic Regression gradients, Kernel trick, and Decision Tree Gini impurity.",
+    type: "pyqs",
+    fileFormat: "PDF",
+    fileSize: "2.2 MB",
+    uploadedBy: {
+      id: "user-maya",
+      name: "Maya L.",
+      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+      role: "student"
+    },
+    uploadedDate: "Sep 06, 2026",
+    createdAt: 17884e8,
+    downloadsCount: 121,
+    viewsCount: 288,
+    isVerified: true,
+    tags: ["PYQ", "Kernel Trick", "Logistic Regression"],
+    unit: "Past Exam",
+    recommendedExam: "IAT 1",
+    contentSnippet: "# 2025 Fall ML Midterm Solutions\n\n1. Derive the log-loss gradient with respect to weights w.\n2. Prove that the RBF kernel is a valid Mercer kernel.\n3. Compute information gain for the root split."
+  }
+];
+var announcements = [
+  {
+    id: "ann-1",
+    classroomId: "cls-1",
+    title: "Internal Exam Schedule Released for Mid-Semesters.",
+    description: "Mid-semester examinations will commence shortly. Please check the Exams tab for the complete timetable, recommended study sheets, and hall allocations.",
+    timestamp: "Today, 09:00 AM",
+    author: "Admin Office",
+    isUrgent: true
+  },
+  {
+    id: "ann-2",
+    classroomId: "cls-1",
+    title: "Guest Lecture: Advances in Machine Learning by Dr. V. Sharma in Hall 3.",
+    description: "All 3rd-year CS students are requested to attend. Attendance will be counted towards the lab curriculum.",
+    timestamp: "Yesterday",
+    author: "Prof. Alan Turing",
+    isUrgent: false
+  },
+  {
+    id: "ann-3",
+    classroomId: "cls-1",
+    title: "Data Structures Assignment 3 Deadline Extended to Sunday Midnight.",
+    description: "Submit your Tree traversal and Graph cycle detection assignments directly via the portal or notes submission tab.",
+    timestamp: "3 days ago",
+    author: "Sarah Jenkins (Class Rep)",
+    isUrgent: false
+  },
+  {
+    id: "ann-4",
+    classroomId: "cls-2",
+    title: "AI301 Midterm Review Workshop & GPU Cluster Access Updated.",
+    description: "Review the Gradient Descent notes and Fall 2025 PYQ in the library before Friday\u2019s live lab walkthrough.",
+    timestamp: "Today, 10:30 AM",
+    author: "Alex Turner (Class Rep)",
+    isUrgent: true
+  },
+  {
+    id: "ann-5",
+    classroomId: "cls-2",
+    title: "Transformer Lab Notebook Templates Published in AI302.",
+    description: "Download the lecture slides and starter attention module benchmarks before next week\u2019s seminar.",
+    timestamp: "2 days ago",
+    author: "Dr. Fei-Fei Li",
+    isUrgent: false
+  }
+];
+var exams = [
+  {
+    id: "exam-1",
+    classroomId: "cls-1",
+    subjectName: "Data Structures",
+    subjectCode: "CS301",
+    date: daysFromToday(5),
+    daysRemaining: 5,
+    time: "10:00 AM - 01:00 PM",
+    examType: "IAT 1",
+    venue: "Hall 201",
+    progressPercent: 80,
+    isCompleted: false
+  },
+  {
+    id: "exam-2",
+    classroomId: "cls-1",
+    subjectName: "Theory of Computation",
+    subjectCode: "CS306",
+    date: daysFromToday(9),
+    daysRemaining: 9,
+    time: "10:00 AM - 01:00 PM",
+    examType: "IAT 1",
+    venue: "Hall 201",
+    progressPercent: 70,
+    isCompleted: false
+  },
+  {
+    id: "exam-3",
+    classroomId: "cls-1",
+    subjectName: "Computer Networks",
+    subjectCode: "CS304",
+    date: daysFromToday(13),
+    daysRemaining: 13,
+    time: "02:00 PM - 05:00 PM",
+    examType: "IAT 1",
+    venue: "Hall 204",
+    progressPercent: 65,
+    isCompleted: false
+  },
+  {
+    id: "exam-4",
+    classroomId: "cls-1",
+    subjectName: "Operating Systems",
+    subjectCode: "CS302",
+    date: daysFromToday(24),
+    daysRemaining: 24,
+    time: "10:00 AM - 01:00 PM",
+    examType: "IAT 2",
+    venue: "Hall 202",
+    progressPercent: 45,
+    isCompleted: false
+  },
+  {
+    id: "exam-5",
+    classroomId: "cls-1",
+    subjectName: "Database Management Systems",
+    subjectCode: "CS305",
+    date: daysFromToday(-10),
+    daysRemaining: -10,
+    time: "10:00 AM - 01:00 PM",
+    examType: "IAT 0",
+    venue: "Hall 105",
+    progressPercent: 100,
+    isCompleted: true
+  },
+  {
+    id: "exam-6",
+    classroomId: "cls-2",
+    subjectName: "Machine Learning Foundations",
+    subjectCode: "AI301",
+    date: daysFromToday(6),
+    daysRemaining: 6,
+    time: "09:30 AM - 12:30 PM",
+    examType: "IAT 1",
+    venue: "Gates Auditorium",
+    progressPercent: 75,
+    isCompleted: false
+  },
+  {
+    id: "exam-7",
+    classroomId: "cls-2",
+    subjectName: "Deep Learning & Transformers",
+    subjectCode: "AI302",
+    date: daysFromToday(16),
+    daysRemaining: 16,
+    time: "02:00 PM - 05:00 PM",
+    examType: "IAT 2",
+    venue: "NVIDIA Lab 102",
+    progressPercent: 50,
+    isCompleted: false
+  }
+];
+var members = [
+  {
+    id: "user-sarah",
+    classroomId: "cls-1",
+    name: "Sarah Jenkins",
+    email: "sarah.j@oxford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+    role: "super_admin",
+    rollNumber: "CS22B042",
+    joinedDate: "Aug 2024"
+  },
+  {
+    id: "user-michael",
+    classroomId: "cls-1",
+    name: "Michael Klein",
+    email: "michael.k@oxford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg",
+    role: "admin",
+    rollNumber: "CS22B018",
+    joinedDate: "Aug 2024"
+  },
+  {
+    id: "user-elena",
+    classroomId: "cls-1",
+    name: "Elena Rostova",
+    email: "elena.r@oxford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+    role: "student",
+    rollNumber: "CS22B029",
+    joinedDate: "Sep 2024"
+  },
+  {
+    id: "user-david",
+    classroomId: "cls-1",
+    name: "David Chen",
+    email: "david.c@oxford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAZtyqQ3lycnq7AMccaFmVziEt3AOMSS90B5pj4-UFEp42WGtql_hBxHwcbB4K-JONAFXKO9-abTCyW9oAG_JgeGVlyq9sx6f93oFLYzHV7HCo51NPdlO26vXmieOXaRjm9rM5PtUHLrI_sqCf2yGFoWopo6LDOqBuZahjQVNFzuGvnqdcddWtdhK7MMA_LBxaxaSFpgc6om_JSFb5BVA_HqzGkhPpFmFemKVwo8Cish1-yDuQlW5yWDQ",
+    role: "student",
+    rollNumber: "CS22B011",
+    joinedDate: "Sep 2024"
+  },
+  {
+    id: "user-alex",
+    classroomId: "cls-2",
+    name: "Alex Turner",
+    email: "alex.t@stanford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A",
+    role: "super_admin",
+    rollNumber: "AI24B001",
+    joinedDate: "Aug 2024"
+  },
+  {
+    id: "user-maya",
+    classroomId: "cls-2",
+    name: "Maya Lin",
+    email: "maya.l@stanford.edu",
+    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+    role: "student",
+    rollNumber: "AI24B014",
+    joinedDate: "Sep 2024"
+  }
+];
 function parseCookies(req) {
   const list = {};
   const rc = req.headers.cookie;
@@ -729,13 +1495,15 @@ app.get("/api/auth/demo-users", (req, res) => {
   res.json(sanitized);
 });
 app.get("/api/auth/me", async (req, res) => {
-  let userToReturn = currentUser;
+  let userToReturn = null;
   const cookies = parseCookies(req);
-  if (!userToReturn && cookies.as_auth_user) {
+  if (cookies.as_auth_user) {
     try {
       const parsed = JSON.parse(cookies.as_auth_user);
       if (parsed && parsed.id) {
-        let registered = registeredUsers.find((u) => u.id === parsed.id || u.email === parsed.email);
+        let registered = registeredUsers.find(
+          (u) => u.id === parsed.id || parsed.email && u.email?.toLowerCase() === parsed.email.toLowerCase()
+        );
         if (!registered) {
           registeredUsers.push(parsed);
           registered = parsed;
@@ -754,6 +1522,9 @@ app.get("/api/auth/me", async (req, res) => {
       currentUser = found;
       userToReturn = found;
     }
+  }
+  if (!userToReturn && currentUser) {
+    userToReturn = currentUser;
   }
   if (!userToReturn) {
     return res.json({ authenticated: false, user: null, classroom: null });
@@ -774,9 +1545,10 @@ app.get("/api/auth/me", async (req, res) => {
       console.warn("Classroom lookup in /api/auth/me notice:", e);
     }
   }
+  const { password: _pwd, ...safeUser } = userToReturn;
   res.json({
     authenticated: true,
-    user: userToReturn,
+    user: safeUser,
     classroom: userClassroom
   });
 });
@@ -825,9 +1597,10 @@ app.post("/api/auth/login", (req, res) => {
   currentUser = foundUser;
   const userClassroom = foundUser.classroomId ? classrooms.find((c) => c.id === foundUser.classroomId) || null : null;
   setAuthCookies(res, foundUser, userClassroom?.id);
+  const { password: _pwd, ...safeUser } = foundUser;
   res.json({
     success: true,
-    user: foundUser,
+    user: safeUser,
     classroom: userClassroom,
     message: `Welcome back, ${foundUser.name}!`
   });
@@ -1370,7 +2143,9 @@ app.get("/api/subjects", async (req, res) => {
   }
   const list = classroomId ? subjects.filter((s) => s.classroomId === classroomId) : subjects;
   const subjectsWithLiveCounts = list.map((s) => {
-    const subMats = materials.filter((m) => m.subjectId === s.id || m.subjectCode?.toLowerCase() === s.code?.toLowerCase());
+    const subMats = materials.filter(
+      (m) => m.subjectId === s.id || (!m.classroomId || m.classroomId === s.classroomId) && m.subjectCode?.toLowerCase() === s.code?.toLowerCase()
+    );
     return {
       ...s,
       materialsCount: subMats.length,
@@ -1396,7 +2171,9 @@ app.get("/api/subjects/:id", async (req, res) => {
   if (!subject) {
     return res.status(404).json({ error: "Subject not found" });
   }
-  const subMats = materials.filter((m) => m.subjectId === subject.id || m.subjectCode?.toLowerCase() === subject.code?.toLowerCase());
+  const subMats = materials.filter(
+    (m) => m.subjectId === subject.id || (!m.classroomId || m.classroomId === subject.classroomId) && m.subjectCode?.toLowerCase() === subject.code?.toLowerCase()
+  );
   res.json({
     ...subject,
     materialsCount: subMats.length,
@@ -1875,9 +2652,145 @@ app.get("/api/classrooms/:id/banned", (req, res) => {
   const list = bannedCohortUsers.filter((b) => b.classroomId === req.params.id);
   res.json(list);
 });
-var chatGroups = [];
-var chatGroupMembers = [];
-var chatMessages = [];
+var chatGroups = [
+  {
+    id: "grp-cls1-general",
+    classroomId: "cls-1",
+    name: "B.Tech CSE '26 \u2014 General Hub",
+    avatar: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80",
+    description: "Main cohort channel for lecture updates, notes sharing, and batch announcements.",
+    isDirect: false,
+    createdBy: "user-sarah",
+    createdAt: "2026-08-15T09:00:00.000Z",
+    updatedAt: "2026-09-06T10:30:00.000Z"
+  },
+  {
+    id: "grp-cls1-exams",
+    classroomId: "cls-1",
+    name: "IAT 1 & Midterms Study Group",
+    avatar: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=150&auto=format&fit=crop&q=80",
+    description: "Past papers, formula sheets, and doubt-clearing for upcoming internals.",
+    isDirect: false,
+    createdBy: "user-michael",
+    createdAt: "2026-08-25T11:00:00.000Z",
+    updatedAt: "2026-09-06T11:15:00.000Z"
+  },
+  {
+    id: "dm-sarah-michael",
+    classroomId: "cls-1",
+    name: "Direct Message",
+    avatar: "",
+    description: "",
+    isDirect: true,
+    createdBy: "user-sarah",
+    createdAt: "2026-09-01T14:00:00.000Z",
+    updatedAt: "2026-09-05T16:20:00.000Z"
+  },
+  {
+    id: "grp-cls2-general",
+    classroomId: "cls-2",
+    name: "Stanford AI & Data '26 Hub",
+    avatar: "https://images.unsplash.com/photo-1531482615713-2afd69097998?w=150&auto=format&fit=crop&q=80",
+    description: "AI & Data Science cohort channel for paper discussions, lab notes, and exam prep.",
+    isDirect: false,
+    createdBy: "user-alex",
+    createdAt: "2026-08-20T09:00:00.000Z",
+    updatedAt: "2026-09-06T12:00:00.000Z"
+  }
+];
+var chatGroupMembers = [
+  { groupId: "grp-cls1-general", userId: "user-sarah", role: "admin", joinedAt: "2026-08-15T09:00:00.000Z" },
+  { groupId: "grp-cls1-general", userId: "user-michael", role: "admin", joinedAt: "2026-08-15T09:05:00.000Z" },
+  { groupId: "grp-cls1-general", userId: "user-elena", role: "member", joinedAt: "2026-08-16T10:00:00.000Z" },
+  { groupId: "grp-cls1-general", userId: "user-david", role: "member", joinedAt: "2026-08-16T10:30:00.000Z" },
+  { groupId: "grp-cls1-exams", userId: "user-sarah", role: "admin", joinedAt: "2026-08-25T11:00:00.000Z" },
+  { groupId: "grp-cls1-exams", userId: "user-michael", role: "admin", joinedAt: "2026-08-25T11:05:00.000Z" },
+  { groupId: "grp-cls1-exams", userId: "user-elena", role: "member", joinedAt: "2026-08-25T11:10:00.000Z" },
+  { groupId: "grp-cls1-exams", userId: "user-david", role: "member", joinedAt: "2026-08-25T11:15:00.000Z" },
+  { groupId: "dm-sarah-michael", userId: "user-sarah", role: "admin", joinedAt: "2026-09-01T14:00:00.000Z" },
+  { groupId: "dm-sarah-michael", userId: "user-michael", role: "admin", joinedAt: "2026-09-01T14:00:00.000Z" },
+  { groupId: "grp-cls2-general", userId: "user-alex", role: "admin", joinedAt: "2026-08-20T09:00:00.000Z" },
+  { groupId: "grp-cls2-general", userId: "user-maya", role: "member", joinedAt: "2026-08-21T09:30:00.000Z" }
+];
+var chatMessages = [
+  {
+    id: "msg-demo-1",
+    groupId: "grp-cls1-general",
+    senderId: "user-sarah",
+    senderName: "Sarah Jenkins",
+    senderAvatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+    type: "text",
+    content: "Welcome to the B.Tech CSE 2026 Sanctuary! All verified Data Structures, OS, Networks, and TOC notes are now live in the library.",
+    timestamp: "09:15 AM",
+    createdAt: Date.now() - 1e3 * 60 * 90,
+    deliveredTo: ["user-sarah", "user-michael", "user-elena", "user-david"],
+    readBy: ["user-sarah", "user-michael"],
+    isPinned: true
+  },
+  {
+    id: "msg-demo-2",
+    groupId: "grp-cls1-general",
+    senderId: "user-elena",
+    senderName: "Elena Rostova",
+    senderAvatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCGaR09JxPLMxTUqAOn21XHcUqnAmqIeBD6jAqrDU96ITXbLPrkZZaOCjQK7IIR0PKxWNWRRHW7UpC6dTEYhaUWD4iA8mgfmc13xgb933NjQg-Kp__Lo1419atLEixTCMlfpxIvT1-8pb6FjhhmuDcoj3YBiMdoQrxSHJdiO59ij_2u55zAV4duQwWVxUctNVbs3budTAzNTx5QK-4QBTQeVbxrdva2Bi57wirGxl-DIZIC8wyz5e_v2A",
+    type: "text",
+    content: "Thanks Sarah! I also uploaded the Midterm Review Notes with solved past problems for CS301.",
+    timestamp: "09:24 AM",
+    createdAt: Date.now() - 1e3 * 60 * 75,
+    deliveredTo: ["user-sarah", "user-michael", "user-elena"],
+    readBy: ["user-sarah", "user-elena"]
+  },
+  {
+    id: "msg-demo-3",
+    groupId: "grp-cls1-exams",
+    senderId: "user-sarah",
+    senderName: "Sarah Jenkins",
+    senderAvatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCpKVqp8kbAfxGqOzgulKLDI74NQiSdlDhDdFDyQV_evpa8r7d5WkZGkgnCShgY15unIPoRzhmSGM8c5eYPlAfPusWbCSY4vPjAwP8KRomBMr7KQOQX0hIJBjhcSdgOwc2dkZEXm70URgJJ9cLOY4dgO0jxryXS4sw8mAUGz6kgZFPaT6gja0ikk7HNAfoTyv5oY_mEIBEb28YJUw2rW5IOw1WBEJ7mg51EYzStKeEueXcmsQHbIoC-nA",
+    type: "material_forward",
+    content: "Check out the Trees & Graphs guide before the CS301 IAT 1!",
+    forwardedMaterial: {
+      id: "mat-1",
+      title: "Trees & Graphs Deep Dive",
+      subjectCode: "CS301",
+      subjectName: "Data Structures",
+      type: "notes",
+      fileFormat: "PDF",
+      fileSize: "2.4 MB",
+      snippet: "# Trees & Graphs Deep Dive\n\nComprehensive guide covering BST, AVL Trees, BFS/DFS & Dijkstra."
+    },
+    timestamp: "10:05 AM",
+    createdAt: Date.now() - 1e3 * 60 * 50,
+    deliveredTo: ["user-sarah", "user-michael", "user-elena", "user-david"],
+    readBy: ["user-sarah"]
+  },
+  {
+    id: "msg-demo-4",
+    groupId: "dm-sarah-michael",
+    senderId: "user-michael",
+    senderName: "Michael Klein",
+    senderAvatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuCBi-zIOKYT1CTN9RV3ZzQNieXOigrdCfr81_ihfbOqXHZzoMgFBdaEoBMZKl89hXhj_Om3SEgrx7dTB_i9FJqzma_T0g0Tf3DtnuXuWmMdQnaX-eOgOcdJLbUhWfy34CChRKQFpmloUWTp4QMGnnPQ-C3Lndf0MXhLQ80s437Z0YbdROLpO8-R6f8rAPpT8SPOAHaGk_thBcwBigM4TyxJMNJZWmNHABG_qY1TNnmdM-E3z0-9U-ATvg",
+    type: "text",
+    content: "Hey Sarah, I verified the Sorting Cheat Sheet and Master Theorem notes for IAT 1 & 2.",
+    timestamp: "10:15 AM",
+    createdAt: Date.now() - 1e3 * 60 * 35,
+    deliveredTo: ["user-sarah", "user-michael"],
+    readBy: ["user-michael"]
+  },
+  {
+    id: "msg-demo-5",
+    groupId: "grp-cls2-general",
+    senderId: "user-alex",
+    senderName: "Alex Turner",
+    senderAvatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAOr9ihyIm8fSL2h8ABIdrhEVsTaSSF1MtWlN3-YQRsFcatsotXnT-Tfz31RRQSgyBaGTFnMG3ZGt8-p2sw8GjnpuUO7yGjxsa11thhS0YCg3XmDsccUBx_Pswu3idSrwAlTd8vKzteip1VJeTr8GdDPfUHN7HqksrK4F0q2hknVgq0tJPtorwnixkwU2OyTcR6qrX4XGogOpYu7-tfu6gvAe9Qxu6fGwcudfTfRMW-g0WyhVbb7_v17A",
+    type: "text",
+    content: "Welcome to Stanford AI & Data 2026! Check out the AI301 notes and Fall 2025 Midterm PYQ in the Notes Library.",
+    timestamp: "11:00 AM",
+    createdAt: Date.now() - 1e3 * 60 * 25,
+    deliveredTo: ["user-alex", "user-maya"],
+    readBy: ["user-alex"],
+    isPinned: true
+  }
+];
 async function syncWithSupabase() {
   try {
     const [dbCls, dbSubs, dbMats, dbAnns, dbExs, dbMems, dbGrps] = await Promise.all([
@@ -1890,25 +2803,25 @@ async function syncWithSupabase() {
       dbFetchChatGroups()
     ]);
     if (dbCls && dbCls.length > 0) {
-      classrooms = dbCls;
+      classrooms = mergeRecordsById(dbCls, classrooms);
     }
     if (dbSubs && dbSubs.length > 0) {
-      subjects = dbSubs;
+      subjects = mergeRecordsById(dbSubs, subjects);
     }
     if (dbMats && dbMats.length > 0) {
-      materials = dbMats;
+      materials = mergeRecordsById(dbMats, materials);
     }
     if (dbAnns && dbAnns.length > 0) {
-      announcements = dbAnns;
+      announcements = mergeRecordsById(dbAnns, announcements);
     }
     if (dbExs && dbExs.length > 0) {
-      exams = dbExs;
+      exams = mergeRecordsById(dbExs, exams);
     }
     if (dbMems && dbMems.length > 0) {
-      members = dbMems;
+      members = mergeRecordsById(dbMems, members);
     }
     if (dbGrps && dbGrps.length > 0) {
-      chatGroups = dbGrps;
+      chatGroups = mergeRecordsById(dbGrps, chatGroups);
       dbGrps.forEach((g) => {
         (g.memberIds || []).forEach((uid) => {
           if (!chatGroupMembers.some((m) => m.groupId === g.id && m.userId === uid)) {
@@ -1976,10 +2889,75 @@ function getCurrentOrReqUser(req) {
 }
 var connectedSockets = /* @__PURE__ */ new Map();
 function isUserOnline(userId) {
-  for (const client of connectedSockets.values()) {
-    if (client.userId === userId) return true;
+  for (const [clientWs, info] of connectedSockets.entries()) {
+    if (clientWs.readyState === WebSocket.OPEN && info.userId === userId) {
+      return true;
+    }
   }
   return false;
+}
+function getInitialDeliveredUsers(groupId, senderId) {
+  const delivered = /* @__PURE__ */ new Set([senderId]);
+  const membersInGroup = chatGroupMembers.filter((m) => m.groupId === groupId);
+  for (const member of membersInGroup) {
+    if (member.userId !== senderId && isUserOnline(member.userId)) {
+      delivered.add(member.userId);
+    }
+  }
+  return Array.from(delivered);
+}
+function markUserDeliveredInGroups(userId, targetGroupIds) {
+  if (!userId || userId === "user-guest") return;
+  const userGroupSet = new Set(
+    chatGroupMembers.filter((m) => m.userId === userId).map((m) => m.groupId)
+  );
+  const allowedGroups = targetGroupIds ? new Set(targetGroupIds.filter((gid) => userGroupSet.has(gid))) : userGroupSet;
+  if (allowedGroups.size === 0) return;
+  const updatedByGroup = /* @__PURE__ */ new Map();
+  for (const m of chatMessages) {
+    if (!allowedGroups.has(m.groupId)) continue;
+    if (!m.deliveredTo.includes(userId)) {
+      m.deliveredTo.push(userId);
+      if (!updatedByGroup.has(m.groupId)) {
+        updatedByGroup.set(m.groupId, []);
+      }
+      updatedByGroup.get(m.groupId).push(m.id);
+      dbUpdateChatMessage(m.id, { deliveredTo: m.deliveredTo }).catch(() => {
+      });
+    }
+  }
+  for (const [groupId, messageIds] of updatedByGroup.entries()) {
+    broadcastToGroup(groupId, {
+      type: "chat:delivered_receipt",
+      groupId,
+      userId,
+      messageIds
+    });
+  }
+}
+function markGroupMessagesRead(groupId, userId) {
+  if (!groupId || !userId || userId === "user-guest") return 0;
+  const unread = chatMessages.filter(
+    (m) => m.groupId === groupId && !m.readBy.includes(userId)
+  );
+  if (unread.length === 0) return 0;
+  const messageIds = [];
+  unread.forEach((m) => {
+    m.readBy.push(userId);
+    if (!m.deliveredTo.includes(userId)) {
+      m.deliveredTo.push(userId);
+    }
+    messageIds.push(m.id);
+    dbUpdateChatMessage(m.id, { readBy: m.readBy, deliveredTo: m.deliveredTo }).catch(() => {
+    });
+  });
+  broadcastToGroup(groupId, {
+    type: "chat:read_receipt",
+    groupId,
+    userId,
+    messageIds
+  });
+  return unread.length;
 }
 function broadcastToGroup(groupId, data, excludeWs) {
   const memberEntries = chatGroupMembers.filter((m) => m.groupId === groupId);
@@ -2013,7 +2991,9 @@ wss.on("connection", (ws) => {
         const classroomId = data.classroomId || (currentUser ? currentUser.classroomId : "");
         connectedSockets.set(ws, { userId, classroomId });
         const onlineUserIds = Array.from(
-          new Set(Array.from(connectedSockets.values()).map((c) => c.userId))
+          new Set(
+            Array.from(connectedSockets.entries()).filter(([clientWs]) => clientWs.readyState === WebSocket.OPEN).map(([, c]) => c.userId)
+          )
         );
         ws.send(
           JSON.stringify({
@@ -2022,6 +3002,26 @@ wss.on("connection", (ws) => {
           })
         );
         broadcastPresence(userId, true);
+        markUserDeliveredInGroups(userId);
+      } else if (data.type === "delivered") {
+        if (data.groupId && data.userId) {
+          if (data.messageId) {
+            const msg = chatMessages.find((m) => m.id === data.messageId && m.groupId === data.groupId);
+            if (msg && !msg.deliveredTo.includes(data.userId)) {
+              msg.deliveredTo.push(data.userId);
+              dbUpdateChatMessage(msg.id, { deliveredTo: msg.deliveredTo }).catch(() => {
+              });
+              broadcastToGroup(data.groupId, {
+                type: "chat:delivered_receipt",
+                groupId: data.groupId,
+                userId: data.userId,
+                messageIds: [msg.id]
+              });
+            }
+          } else {
+            markUserDeliveredInGroups(data.userId, [data.groupId]);
+          }
+        }
       } else if (data.type === "typing") {
         if (data.groupId && data.userId) {
           broadcastToGroup(
@@ -2038,15 +3038,7 @@ wss.on("connection", (ws) => {
         }
       } else if (data.type === "read") {
         if (data.groupId && data.userId) {
-          const unread = chatMessages.filter(
-            (m) => m.groupId === data.groupId && !m.readBy.includes(data.userId)
-          );
-          unread.forEach((m) => m.readBy.push(data.userId));
-          broadcastToGroup(data.groupId, {
-            type: "chat:read_receipt",
-            groupId: data.groupId,
-            userId: data.userId
-          });
+          markGroupMessagesRead(data.groupId, data.userId);
         }
       }
     } catch (err) {
@@ -2120,6 +3112,7 @@ app.get("/api/chat/groups", async (req, res) => {
   }
   const userMemberships = chatGroupMembers.filter((m) => m.userId === userId);
   const userGroupIds = new Set(userMemberships.map((m) => m.groupId));
+  markUserDeliveredInGroups(userId, Array.from(userGroupIds));
   const relevantGroups = chatGroups.filter((g) => userGroupIds.has(g.id) && (!classroomId || g.classroomId === classroomId)).map((g) => {
     const groupMembersList = chatGroupMembers.filter((m) => m.groupId === g.id);
     const adminIds = groupMembersList.filter((m) => m.role === "admin").map((m) => m.userId);
@@ -2154,12 +3147,13 @@ app.get("/api/chat/groups", async (req, res) => {
         timestamp: lastMsg.timestamp,
         senderName: lastMsg.senderName,
         senderId: lastMsg.senderId,
-        type: lastMsg.type
+        type: lastMsg.type,
+        createdAt: lastMsg.createdAt
       } : void 0
     };
   }).sort((a, b) => {
-    const timeA = a.lastMessage ? new Date(a.createdAt).getTime() : 0;
-    const timeB = b.lastMessage ? new Date(b.createdAt).getTime() : 0;
+    const timeA = a.lastMessage?.createdAt || new Date(a.createdAt).getTime() || 0;
+    const timeB = b.lastMessage?.createdAt || new Date(b.createdAt).getTime() || 0;
     return timeB - timeA;
   });
   res.json(relevantGroups);
@@ -2536,12 +3530,8 @@ app.get("/api/chat/groups/:id/messages", async (req, res) => {
   if (!isMember) {
     return res.status(403).json({ error: "Access denied: You are not a member of this conversation" });
   }
+  markUserDeliveredInGroups(activeUser.id, [groupId]);
   const groupMsgs = chatMessages.filter((m) => m.groupId === groupId);
-  groupMsgs.forEach((m) => {
-    if (!m.deliveredTo.includes(activeUser.id)) {
-      m.deliveredTo.push(activeUser.id);
-    }
-  });
   res.json(groupMsgs);
 });
 app.post("/api/chat/groups/:id/messages", (req, res) => {
@@ -2553,7 +3543,7 @@ app.post("/api/chat/groups/:id/messages", (req, res) => {
   if (!isMember) {
     return res.status(403).json({ error: "Cannot send message to a group you do not belong to" });
   }
-  const { type = "text", content, fileUrl, fileName, fileSize, forwardedMaterial, replyTo } = req.body;
+  const { type = "text", content, fileUrl, fileName, fileSize, forwardedMaterial, replyTo, clientTempId } = req.body;
   if (!content && !fileUrl && !forwardedMaterial) {
     return res.status(400).json({ error: "Message content or attachment is required" });
   }
@@ -2575,7 +3565,7 @@ app.post("/api/chat/groups/:id/messages", (req, res) => {
     reactions: [],
     timestamp: timeFormatted,
     createdAt: Date.now(),
-    deliveredTo: [activeUser.id],
+    deliveredTo: getInitialDeliveredUsers(groupId, activeUser.id),
     readBy: [activeUser.id]
   };
   chatMessages.push(newMsg);
@@ -2587,7 +3577,8 @@ app.post("/api/chat/groups/:id/messages", (req, res) => {
   broadcastToGroup(groupId, {
     type: "chat:message_new",
     groupId,
-    message: newMsg
+    message: newMsg,
+    clientTempId
   });
   res.status(201).json(newMsg);
 });
@@ -2694,11 +3685,12 @@ app.post("/api/chat/messages/forward", (req, res) => {
       forwardedMaterial: sourceMsg.forwardedMaterial,
       timestamp: timeFormatted,
       createdAt: Date.now(),
-      deliveredTo: [activeUser.id],
+      deliveredTo: getInitialDeliveredUsers(tGroupId, activeUser.id),
       readBy: [activeUser.id]
     };
     chatMessages.push(fwdMsg);
     createdMsgs.push(fwdMsg);
+    dbSaveChatMessage(fwdMsg).catch((e) => console.warn("Supabase save forwarded msg warning:", e));
     const grp = chatGroups.find((g) => g.id === tGroupId);
     if (grp) grp.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     broadcastToGroup(tGroupId, {
@@ -2804,11 +3796,12 @@ app.post("/api/chat/materials/forward", (req, res) => {
       forwardedMaterial: forwardedMaterialInfo,
       timestamp: timeFormatted,
       createdAt: Date.now(),
-      deliveredTo: [activeUser.id],
+      deliveredTo: getInitialDeliveredUsers(tGroupId, activeUser.id),
       readBy: [activeUser.id]
     };
     chatMessages.push(fwdMsg);
     createdMsgs.push(fwdMsg);
+    dbSaveChatMessage(fwdMsg).catch((e) => console.warn("Supabase save forwarded msg warning:", e));
     const grp = chatGroups.find((g) => g.id === tGroupId);
     if (grp) {
       grp.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -2824,6 +3817,52 @@ app.post("/api/chat/materials/forward", (req, res) => {
     forwardedCount: createdMsgs.length,
     groupIds: Array.from(resolvedGroupIds)
   });
+});
+app.patch("/api/chat/messages/:id", async (req, res) => {
+  const activeUser = getCurrentOrReqUser(req);
+  let msg = chatMessages.find((m) => m.id === req.params.id);
+  if (!msg && req.body?.groupId) {
+    try {
+      const dbMsgs = await dbFetchChatMessages(String(req.body.groupId));
+      if (dbMsgs && dbMsgs.length > 0) {
+        chatMessages = mergeRecordsById(dbMsgs, chatMessages);
+        msg = chatMessages.find((m) => m.id === req.params.id);
+      }
+    } catch {
+    }
+  }
+  if (!msg) return res.status(404).json({ error: "Message not found" });
+  if (msg.senderId !== activeUser.id) {
+    return res.status(403).json({ error: "You can only edit your own messages" });
+  }
+  if (msg.isDeleted) {
+    return res.status(400).json({ error: "Deleted messages cannot be edited" });
+  }
+  if (msg.type === "material_forward") {
+    return res.status(400).json({ error: "Forwarded materials cannot be edited" });
+  }
+  const { content } = req.body;
+  const trimmedContent = typeof content === "string" ? content.trim() : "";
+  if (!trimmedContent) {
+    return res.status(400).json({ error: "Message content cannot be empty" });
+  }
+  msg.content = trimmedContent;
+  msg.isEdited = true;
+  msg.editedAt = Date.now();
+  dbUpdateChatMessage(msg.id, {
+    content: msg.content,
+    isEdited: true,
+    editedAt: msg.editedAt
+  }).catch((e) => console.warn("Supabase update edited message warning:", e));
+  broadcastToGroup(msg.groupId, {
+    type: "chat:message_edited",
+    groupId: msg.groupId,
+    messageId: msg.id,
+    content: msg.content,
+    isEdited: true,
+    editedAt: msg.editedAt
+  });
+  res.json({ success: true, message: msg });
 });
 app.delete("/api/chat/messages/:id", (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
@@ -2855,45 +3894,35 @@ app.delete("/api/chat/messages/:id", (req, res) => {
 app.post("/api/chat/groups/:id/read", (req, res) => {
   const activeUser = getCurrentOrReqUser(req);
   const groupId = req.params.id;
-  const unread = chatMessages.filter(
-    (m) => m.groupId === groupId && !m.readBy.includes(activeUser.id)
-  );
-  unread.forEach((m) => {
-    m.readBy.push(activeUser.id);
-    if (!m.deliveredTo.includes(activeUser.id)) {
-      m.deliveredTo.push(activeUser.id);
-    }
-  });
-  broadcastToGroup(groupId, {
-    type: "chat:read_receipt",
-    groupId,
-    userId: activeUser.id
-  });
-  res.json({ success: true, readCount: unread.length });
+  const readCount = markGroupMessagesRead(groupId, activeUser.id);
+  res.json({ success: true, readCount });
 });
 app.patch("/api/users/profile", (req, res) => {
-  const { name, avatar } = req.body;
-  if (!currentUser) {
+  const activeUser = getCurrentOrReqUser(req);
+  if (!activeUser || activeUser.id === "user-guest") {
     return res.status(401).json({ error: "User not authenticated" });
   }
+  const { name, avatar } = req.body;
   if (name && typeof name === "string" && name.trim()) {
-    currentUser.name = name.trim();
+    activeUser.name = name.trim();
+    if (currentUser && currentUser.id === activeUser.id) currentUser.name = activeUser.name;
   }
   if (avatar && typeof avatar === "string" && avatar.trim()) {
-    currentUser.avatar = avatar.trim();
+    activeUser.avatar = avatar.trim();
+    if (currentUser && currentUser.id === activeUser.id) currentUser.avatar = activeUser.avatar;
   }
-  const reg = registeredUsers.find((u) => u.id === currentUser.id);
+  const reg = registeredUsers.find((u) => u.id === activeUser.id);
   if (reg) {
     if (name && typeof name === "string" && name.trim()) reg.name = name.trim();
     if (avatar && typeof avatar === "string" && avatar.trim()) reg.avatar = avatar.trim();
   }
-  const mem = members.find((m) => m.id === currentUser.id);
+  const mem = members.find((m) => m.id === activeUser.id);
   if (mem) {
     if (name && typeof name === "string" && name.trim()) mem.name = name.trim();
     if (avatar && typeof avatar === "string" && avatar.trim()) mem.avatar = avatar.trim();
   }
   chatMessages.forEach((m) => {
-    if (m.senderId === currentUser.id) {
+    if (m.senderId === activeUser.id) {
       if (name && typeof name === "string" && name.trim()) m.senderName = name.trim();
       if (avatar && typeof avatar === "string" && avatar.trim()) m.senderAvatar = avatar.trim();
     }
@@ -2903,14 +3932,16 @@ app.patch("/api/users/profile", (req, res) => {
       clientWs.send(
         JSON.stringify({
           type: "chat:user_profile_updated",
-          userId: currentUser.id,
-          name: currentUser.name,
-          avatar: currentUser.avatar
+          userId: activeUser.id,
+          name: activeUser.name,
+          avatar: activeUser.avatar
         })
       );
     }
   }
-  res.json({ success: true, user: currentUser });
+  setAuthCookies(res, activeUser, activeUser.classroomId);
+  const { password: _pwd, ...safeUser } = activeUser;
+  res.json({ success: true, user: safeUser });
 });
 app.patch("/api/chat/friend-name", (req, res) => {
   const { targetUserId, name, groupId } = req.body;

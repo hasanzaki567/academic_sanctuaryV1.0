@@ -99,7 +99,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     );
   }
 
-  const showBackButton = onBack && (canGoBack || currentView !== 'dashboard');
+  const showBackButton = Boolean(onBack && canGoBack);
 
   return (
     <header className="fixed top-0 w-full z-40 flex justify-between items-center px-4 sm:px-6 md:px-8 lg:px-10 py-3 bg-[#FDFCF8]/95 backdrop-blur-md border-b border-[#E5E4E2]">

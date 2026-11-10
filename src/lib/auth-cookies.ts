@@ -1,7 +1,10 @@
-import { User } from '../types';
+import { Classroom, User } from '../types';
 
 const USER_COOKIE_KEY = 'as_auth_user';
 const CLASSROOM_COOKIE_KEY = 'as_active_classroom_id';
+const CLASSROOM_OBJ_KEY = 'as_active_classroom_obj';
+const NAV_VIEW_KEY = 'as_current_view';
+const NAV_SUBJECT_KEY = 'as_selected_subject_id';
 
 // Cookie helpers
 function setCookie(name: string, value: string, days = 30) {
@@ -131,6 +134,70 @@ export function updateSessionClassroomId(classroomId: string) {
 }
 
 /**
+ * Persist and restore active classroom snapshot for instant refresh hydration
+ */
+export function saveSessionClassroom(classroom: Classroom | null) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (classroom) {
+        window.localStorage.setItem(CLASSROOM_OBJ_KEY, JSON.stringify(classroom));
+      } else {
+        window.localStorage.removeItem(CLASSROOM_OBJ_KEY);
+      }
+    }
+  } catch (e) {
+    console.warn('Error saving session classroom:', e);
+  }
+}
+
+export function getSessionClassroom(): Classroom | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(CLASSROOM_OBJ_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.id) return parsed as Classroom;
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading session classroom:', e);
+  }
+  return null;
+}
+
+/**
+ * Persist and restore current active page & subject across page refreshes
+ */
+export function saveNavigationState(view: string, subjectId?: string | null) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(NAV_VIEW_KEY, view);
+      if (subjectId) {
+        window.localStorage.setItem(NAV_SUBJECT_KEY, subjectId);
+      } else {
+        window.localStorage.removeItem(NAV_SUBJECT_KEY);
+      }
+    }
+  } catch (e) {
+    console.warn('Error saving navigation state:', e);
+  }
+}
+
+export function getNavigationState(): { view: string | null; subjectId: string | null } {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return {
+        view: window.localStorage.getItem(NAV_VIEW_KEY),
+        subjectId: window.localStorage.getItem(NAV_SUBJECT_KEY),
+      };
+    }
+  } catch (e) {
+    console.warn('Error reading navigation state:', e);
+  }
+  return { view: null, subjectId: null };
+}
+
+/**
  * Clear session cookies and localStorage upon signing out
  */
 export function clearSessionUser() {
@@ -140,6 +207,10 @@ export function clearSessionUser() {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.removeItem(USER_COOKIE_KEY);
       window.localStorage.removeItem(CLASSROOM_COOKIE_KEY);
+      window.localStorage.removeItem(CLASSROOM_OBJ_KEY);
+      window.localStorage.removeItem(NAV_VIEW_KEY);
+      window.localStorage.removeItem(NAV_SUBJECT_KEY);
+      window.localStorage.removeItem('as_notes_subject_id');
     }
   } catch (e) {
     console.warn('Error clearing session user:', e);

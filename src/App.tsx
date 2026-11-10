@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Classroom, User, Subject, Material, Announcement, Exam, Member, UserRole } from './types';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
@@ -22,17 +22,44 @@ import {
   saveSessionUser,
   getSessionUser,
   updateSessionClassroomId,
+  saveSessionClassroom,
+  getSessionClassroom,
+  saveNavigationState,
+  getNavigationState,
   clearSessionUser,
 } from './lib/auth-cookies';
 import { MessageSquare, UserCheck, School } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
+const VALID_AUTH_VIEWS = new Set([
+  'dashboard',
+  'subjects',
+  'subject-detail',
+  'notes',
+  'exams',
+  'members',
+  'chat',
+  'profile',
+  'create-classroom',
+]);
+
 export default function App() {
-  // Synchronous session restore from cookies to prevent any logout flash on page refresh
+  // Synchronous session & page restore from cookies/localStorage to prevent logout or redirect flash on refresh
   const initialSession = typeof window !== 'undefined' ? getSessionUser() : { user: null, classroomId: null };
+  const initialClassroom = typeof window !== 'undefined' ? getSessionClassroom() : null;
+  const initialNav = typeof window !== 'undefined' ? getNavigationState() : { view: null, subjectId: null };
+  const initialRestoredView =
+    initialSession.user && initialNav.view && VALID_AUTH_VIEWS.has(initialNav.view)
+      ? initialNav.view
+      : initialSession.user
+      ? 'dashboard'
+      : 'landing';
+
+  const suppressNextSignOutRef = useRef(false);
 
   // App navigation state: 'landing' | 'dashboard' | 'subject-detail' | 'create-classroom' | 'subjects' | 'notes' | 'exams' | 'members' | 'profile' | 'chat'
-  const [currentView, setCurrentView] = useState<string>(initialSession.user ? 'dashboard' : 'landing');
+  const [currentView, setCurrentView] = useState<string>(initialRestoredView);
+  const currentViewRef = useRef<string>(initialRestoredView);
   const [initialChatTargetUserId, setInitialChatTargetUserId] = useState<string | null>(null);
   const [materialToForward, setMaterialToForward] = useState<Material | null>(null);
 
@@ -40,17 +67,31 @@ export default function App() {
   const [navHistory, setNavHistory] = useState<Array<{ view: string; subject?: Subject | null }>>([]);
 
   const handleForwardMaterialFromNotes = (material: Material) => {
+    if (!currentUser) {
+      showToast('Please sign in to forward materials to your cohort chat.');
+      handleOpenAuth('login');
+      return;
+    }
     setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
     setMaterialToForward(material);
     setCurrentView('chat');
   };
   
   // Data states
-  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [activeClassroom, setActiveClassroom] = useState<Classroom | null>(null);
+  const [classrooms, setClassrooms] = useState<Classroom[]>(initialClassroom ? [initialClassroom] : []);
+  const [activeClassroom, setActiveClassroom] = useState<Classroom | null>(
+    initialSession.user ? initialClassroom : null
+  );
   const [currentUser, setCurrentUser] = useState<User | null>(initialSession.user);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
+
+  useEffect(() => {
+    currentViewRef.current = currentView;
+    if (currentUser && currentView !== 'landing') {
+      saveNavigationState(currentView, selectedSubject?.id || null);
+    }
+  }, [currentView, selectedSubject, currentUser]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -115,7 +156,14 @@ export default function App() {
       if (subRes.ok) {
         const subData = await subRes.json();
         setSubjects(subData);
-        if (subData.length > 0) setSelectedSubject(subData[0]);
+        setSelectedSubject((prev) => {
+          const targetId = prev?.id || getNavigationState().subjectId;
+          if (targetId) {
+            const matched = subData.find((s: Subject) => s.id === targetId);
+            if (matched) return matched;
+          }
+          return subData.length > 0 ? subData[0] : null;
+        });
       }
       if (matRes.ok) {
         const matData = await matRes.json();
@@ -212,9 +260,13 @@ export default function App() {
       saveSessionUser(appUser, matchedCls?.id);
       if (matchedCls) {
         setActiveClassroom(matchedCls);
+        saveSessionClassroom(matchedCls);
         loadClassroomData(matchedCls.id);
       }
-      setCurrentView('dashboard');
+      setNavHistory((prev) => prev.filter((e) => e.view !== 'landing'));
+      if (currentViewRef.current === 'landing') {
+        setCurrentView('dashboard');
+      }
     } catch (err) {
       console.error('Error loading Supabase user profile:', err);
     }
@@ -225,6 +277,8 @@ export default function App() {
     let loadedClassrooms: Classroom[] = [];
 
     const initializeApp = async () => {
+      let hasResolvedClassroom = false;
+
       // 1. Fetch classrooms from server
       try {
         const clsRes = await fetch('/api/classrooms');
@@ -237,7 +291,9 @@ export default function App() {
           if (targetClsId) {
             const matched = loadedClassrooms.find((c) => c.id === targetClsId);
             if (matched) {
+              hasResolvedClassroom = true;
               setActiveClassroom(matched);
+              saveSessionClassroom(matched);
               loadClassroomData(matched.id);
             }
           }
@@ -253,6 +309,7 @@ export default function App() {
       }
 
       // 3. Verify server session via /api/auth/me using cookies
+      let restoredLocalUser = false;
       try {
         const meRes = await fetch('/api/auth/me', {
           headers: initialSession.user ? { 'x-user-id': initialSession.user.id } : {},
@@ -260,6 +317,9 @@ export default function App() {
         if (meRes.ok) {
           const meData = await meRes.json();
           if (meData.authenticated && meData.user) {
+            if (typeof meData.user.id === 'string' && meData.user.id.startsWith('user-')) {
+              restoredLocalUser = true;
+            }
             setCurrentUser(meData.user);
             const targetCls =
               meData.classroom ||
@@ -268,35 +328,46 @@ export default function App() {
               (loadedClassrooms.length > 0 ? loadedClassrooms[0] : null);
 
             if (targetCls) {
+              hasResolvedClassroom = true;
               setActiveClassroom(targetCls);
+              saveSessionClassroom(targetCls);
               loadClassroomData(targetCls.id);
               setShowCohortChoiceModal(false);
             } else if (!meData.user.classroomId) {
               setShowCohortChoiceModal(true);
             }
             saveSessionUser(meData.user, targetCls?.id);
-            setCurrentView('dashboard');
+            setNavHistory((prev) => prev.filter((e) => e.view !== 'landing'));
+            if (currentViewRef.current === 'landing') {
+              setCurrentView('dashboard');
+            }
           }
         }
       } catch (meErr) {
         console.warn('Notice from /api/auth/me verification:', meErr);
       }
 
-      // 4. Restore active Supabase session
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          await loadSupabaseUser(session.user, loadedClassrooms);
-          setCurrentView('dashboard');
+      // 4. Restore active Supabase session (only if not already signed in to a demo/local session)
+      if (!restoredLocalUser) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            hasResolvedClassroom = true;
+            await loadSupabaseUser(session.user, loadedClassrooms);
+            if (currentViewRef.current === 'landing') {
+              setCurrentView('dashboard');
+            }
+          }
+        } catch (err) {
+          console.error('Error restoring Supabase session:', err);
         }
-      } catch (err) {
-        console.error('Error restoring Supabase session:', err);
       }
 
       // Default active classroom if none selected yet and classrooms exist
-      if (loadedClassrooms.length > 0 && !activeClassroom) {
+      if (loadedClassrooms.length > 0 && !hasResolvedClassroom) {
         const first = loadedClassrooms[0];
         setActiveClassroom(first);
+        saveSessionClassroom(first);
         loadClassroomData(first.id);
       }
     };
@@ -310,8 +381,14 @@ export default function App() {
         setIsAuthOpen(true);
       } else if (event === 'SIGNED_IN' && session?.user) {
         await loadSupabaseUser(session.user, loadedClassrooms);
-        setCurrentView('dashboard');
+        if (currentViewRef.current === 'landing') {
+          setCurrentView('dashboard');
+        }
       } else if (event === 'SIGNED_OUT') {
+        if (suppressNextSignOutRef.current) {
+          suppressNextSignOutRef.current = false;
+          return;
+        }
         clearSessionUser();
         setCurrentUser(null);
         setActiveClassroom(null);
@@ -331,7 +408,9 @@ export default function App() {
       handleOpenAuth('login');
       return;
     }
-    setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
+    if (!(currentUser && currentView === 'landing')) {
+      setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
+    }
     if (view === 'subject-detail' && data) {
       setSelectedSubject(data);
     }
@@ -342,21 +421,30 @@ export default function App() {
   const handleGoBack = () => {
     if (navHistory.length > 0) {
       const nextHist = [...navHistory];
-      const prevEntry = nextHist.pop()!;
-      setNavHistory(nextHist);
-      if (prevEntry.subject) {
-        setSelectedSubject(prevEntry.subject);
+      while (nextHist.length > 0) {
+        const prevEntry = nextHist.pop()!;
+        // Once logged in, never navigate back to the sign-up/sign-in landing page
+        if (currentUser && prevEntry.view === 'landing') {
+          continue;
+        }
+        setNavHistory(nextHist);
+        if (prevEntry.subject) {
+          setSelectedSubject(prevEntry.subject);
+        }
+        setCurrentView(prevEntry.view);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
       }
-      setCurrentView(prevEntry.view);
-    } else {
-      // Fallback hierarchy if stack is empty
-      if (currentView === 'subject-detail') {
-        setCurrentView('notes');
-      } else if (currentView !== 'dashboard' && currentView !== 'landing') {
-        setCurrentView('dashboard');
-      } else if (currentView === 'dashboard') {
-        setCurrentView('landing');
-      }
+      setNavHistory([]);
+    }
+
+    // Fallback hierarchy if stack is empty
+    if (currentView === 'subject-detail') {
+      setCurrentView('notes');
+    } else if (currentView !== 'dashboard' && currentView !== 'landing') {
+      setCurrentView(currentUser ? 'dashboard' : 'landing');
+    } else if (currentView === 'dashboard' && !currentUser) {
+      setCurrentView('landing');
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -366,11 +454,31 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
+  const clearLocalSupabaseSession = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session) {
+        suppressNextSignOutRef.current = true;
+        await supabase.auth.signOut({ scope: 'local' });
+        setTimeout(() => {
+          suppressNextSignOutRef.current = false;
+        }, 1000);
+      }
+    } catch {
+      suppressNextSignOutRef.current = false;
+    }
+  };
+
   const handleAuthSuccess = (user: User, classroom: Classroom | null, message: string) => {
+    if (typeof user.id === 'string' && user.id.startsWith('user-')) {
+      void clearLocalSupabaseSession();
+    }
+    setNavHistory([]);
     setCurrentUser(user);
     saveSessionUser(user, classroom?.id);
     if (classroom) {
       setActiveClassroom(classroom);
+      saveSessionClassroom(classroom);
       if (!classrooms.find((c) => c.id === classroom.id)) {
         setClassrooms([classroom, ...classrooms]);
       }
@@ -380,9 +488,43 @@ export default function App() {
       setCurrentView('dashboard');
     } else {
       setActiveClassroom(null);
+      saveSessionClassroom(null);
       setShowCohortChoiceModal(true);
       showToast(message || `Welcome, ${user.name}! Choose a cohort option to get started.`);
       setCurrentView('dashboard');
+    }
+  };
+
+  const handleQuickDemoLogin = async (email: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await clearLocalSupabaseSession();
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123' }),
+      });
+
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = {};
+      }
+
+      if (res.ok && data.user) {
+        confetti({ particleCount: 50, spread: 60 });
+        handleAuthSuccess(data.user, data.classroom, data.message || `Welcome back, ${data.user.name}!`);
+        return { ok: true };
+      }
+      const errMsg = data.error || `Failed to authenticate demo account (HTTP ${res.status}).`;
+      showToast(errMsg);
+      return { ok: false, error: errMsg };
+    } catch (err: any) {
+      const errMsg = err?.message || 'Error connecting to demo authentication server.';
+      showToast(errMsg);
+      return { ok: false, error: errMsg };
     }
   };
 
@@ -392,6 +534,7 @@ export default function App() {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     clearSessionUser();
+    setNavHistory([]);
     setCurrentUser(null);
     setActiveClassroom(null);
     showToast('Signed out successfully. Returned to sanctuary landing.');
@@ -427,6 +570,7 @@ export default function App() {
         const newCls = await res.json();
         setClassrooms([newCls, ...classrooms]);
         setActiveClassroom(newCls);
+        saveSessionClassroom(newCls);
         if (currentUser) {
           const updatedUser: User = {
             ...currentUser,
@@ -465,6 +609,7 @@ export default function App() {
       const result = await res.json().catch(() => ({}));
       if (res.ok && result.classroom) {
         setActiveClassroom(result.classroom);
+        saveSessionClassroom(result.classroom);
         if (currentUser) {
           const updatedUser: User = {
             ...currentUser,
@@ -714,11 +859,16 @@ export default function App() {
         classrooms={classrooms}
         onNavigate={handleNavigate}
         onBack={handleGoBack}
-        canGoBack={navHistory.length > 0 || currentView !== 'landing'}
+        canGoBack={currentView !== 'landing' && currentView !== 'dashboard' && currentView !== 'create-classroom'}
         onOpenCreateClassroom={() => handleNavigate('create-classroom')}
         onOpenJoinClassroom={() => setIsJoinOpen(true)}
         onSelectClassroom={(cls) => {
           setActiveClassroom(cls);
+          saveSessionClassroom(cls);
+          setSelectedSubject(null);
+          if (currentView === 'subject-detail') {
+            setCurrentView('subjects');
+          }
           if (currentUser) {
             const updatedUser = { ...currentUser, classroomId: cls.id, classCode: cls.code };
             setCurrentUser(updatedUser);
@@ -744,6 +894,9 @@ export default function App() {
             onOpenCreateClassroom={() => handleNavigate('create-classroom')}
             onOpenJoinClassroom={() => setIsJoinOpen(true)}
             onOpenAuth={handleOpenAuth}
+            onQuickDemoLogin={(email) => {
+              void handleQuickDemoLogin(email);
+            }}
           />
         )}
 
@@ -764,7 +917,6 @@ export default function App() {
               nextExam={nextExam}
               recentMaterials={materials.slice(0, 8)}
               onNavigate={handleNavigate}
-              onBack={handleGoBack}
               onOpenUpload={() => handleOpenUpload()}
               onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
               onAddAnnouncement={handleAddAnnouncement}
@@ -804,7 +956,6 @@ export default function App() {
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
             onForwardMaterial={handleForwardMaterialFromNotes}
-            onBack={handleGoBack}
           />
         )}
 
@@ -821,7 +972,6 @@ export default function App() {
             onSelectSubject={(subject) => {
               handleNavigate('subject-detail', subject);
             }}
-            onBack={handleGoBack}
             onAddSubject={(subjectData) => {
               fetch('/api/subjects', {
                 method: 'POST',
@@ -849,7 +999,6 @@ export default function App() {
             onDownloadMaterial={handleDownloadMaterial}
             onOpenUpload={() => handleOpenUpload()}
             onForwardMaterial={handleForwardMaterialFromNotes}
-            onBack={handleGoBack}
           />
         )}
 
@@ -863,7 +1012,6 @@ export default function App() {
             onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
             onDownloadMaterial={handleDownloadMaterial}
             onOpenUpload={(examId, examType) => handleOpenUpload(examId, examType)}
-            onBack={handleGoBack}
             onNavigateToSubject={(code) => {
               const found = subjects.find((s) => s.code.toLowerCase() === code.toLowerCase());
               if (found) {
@@ -886,7 +1034,6 @@ export default function App() {
               onUpdateRole={handleUpdateMemberRole}
               onRemoveMember={handleRemoveMember}
               onBanMember={handleBanMember}
-              onBack={handleGoBack}
               onStartChat={(memberId) => {
                 setNavHistory((prev) => [...prev, { view: currentView, subject: selectedSubject }]);
                 setInitialChatTargetUserId(memberId);
@@ -974,7 +1121,6 @@ export default function App() {
               onClearMaterialToForward={() => setMaterialToForward(null)}
               onRemoveCohortMember={handleRemoveMember}
               onBanCohortMember={handleBanMember}
-              onBack={handleGoBack}
               onUpdateCurrentUser={(updated) => {
                 setCurrentUser((prev) => (prev ? { ...prev, ...updated } : null));
                 setMembers((prev) =>
@@ -1007,7 +1153,6 @@ export default function App() {
               onPreviewMaterial={(mat) => setPreviewMaterial(mat)}
               onOpenAuth={handleOpenAuth}
               onSignOut={handleSignOut}
-              onBack={handleGoBack}
             />
           ) : (
             <div className="max-w-md mx-auto my-16 p-8 bg-white border border-[#E5E4E2] rounded-3xl text-center shadow-md flex flex-col items-center gap-4">
@@ -1046,6 +1191,7 @@ export default function App() {
         initialMode={authInitialMode}
         onClose={() => setIsAuthOpen(false)}
         onAuthSuccess={handleAuthSuccess}
+        onQuickDemoLogin={handleQuickDemoLogin}
         classrooms={classrooms}
       />
 
