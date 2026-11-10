@@ -186,8 +186,13 @@ create table if not exists public.chat_messages (
   is_deleted boolean default false,
   is_pinned boolean default false,
   is_starred boolean default false,
-  starred_by text[] default '{}'
+  starred_by text[] default '{}',
+  is_edited boolean default false,
+  edited_at bigint
 );
+
+alter table public.chat_messages add column if not exists is_edited boolean default false;
+alter table public.chat_messages add column if not exists edited_at bigint;
 
 -- ==========================================================
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES

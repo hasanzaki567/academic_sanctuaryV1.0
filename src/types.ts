@@ -59,6 +59,7 @@ export interface Subject {
 
 export interface Material {
   id: string;
+  classroomId?: string;
   subjectId: string;
   subjectCode: string;
   subjectName: string;
@@ -172,6 +173,10 @@ export interface ChatMessage {
   isPinned?: boolean;
   isStarred?: boolean;
   starredBy?: string[];
+  isEdited?: boolean;
+  editedAt?: number;
+  isPending?: boolean;
+  isFailed?: boolean;
 }
 
 export interface ChatGroupMember {

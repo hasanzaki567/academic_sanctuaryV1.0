@@ -43,7 +43,25 @@ export const NotesRepositoryView: React.FC<NotesRepositoryViewProps> = ({
   onForwardMaterial,
   onBack,
 }) => {
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(() => {
+    try {
+      return typeof window !== 'undefined' ? window.localStorage.getItem('as_notes_subject_id') : null;
+    } catch {
+      return null;
+    }
+  });
+
+  React.useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (selectedSubjectId) {
+          window.localStorage.setItem('as_notes_subject_id', selectedSubjectId);
+        } else {
+          window.localStorage.removeItem('as_notes_subject_id');
+        }
+      }
+    } catch {}
+  }, [selectedSubjectId]);
   const [activeCategory, setActiveCategory] = useState<CategoryType>('all');
   const [search, setSearch] = useState('');
   const [subjectSearch, setSubjectSearch] = useState('');

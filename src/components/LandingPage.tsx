@@ -6,12 +6,14 @@ interface LandingPageProps {
   onOpenCreateClassroom: () => void;
   onOpenJoinClassroom: () => void;
   onOpenAuth: (mode?: 'login' | 'signup') => void;
+  onQuickDemoLogin?: (email: string) => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenCreateClassroom,
   onOpenJoinClassroom,
   onOpenAuth,
+  onQuickDemoLogin,
 }) => {
   const [legalModalOpen, setLegalModalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<LegalDocType>('terms');
@@ -103,6 +105,56 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <LogIn className="w-4 h-4 text-[#56615a]" />
               <span>Sign In</span>
             </button>
+          </div>
+
+          {/* Quick Demo Access Bar */}
+          <div className="mt-8 pt-6 border-t border-[#E5E4E2]/70 max-w-2xl mx-auto flex flex-col items-center gap-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#56615a] uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-[#56615a]" />
+              <span>Quick Demo Access (1-Click Login)</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => (onQuickDemoLogin ? onQuickDemoLogin('sarah.j@oxford.edu') : onOpenAuth('login'))}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span>Sarah (Super Admin - Oxford)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => (onQuickDemoLogin ? onQuickDemoLogin('michael.k@oxford.edu') : onOpenAuth('login'))}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Michael (Admin)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => (onQuickDemoLogin ? onQuickDemoLogin('elena.r@oxford.edu') : onOpenAuth('login'))}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                <span>Elena (Student)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => (onQuickDemoLogin ? onQuickDemoLogin('david.c@oxford.edu') : onOpenAuth('login'))}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-sky-500" />
+                <span>David (Student)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => (onQuickDemoLogin ? onQuickDemoLogin('alex.t@stanford.edu') : onOpenAuth('login'))}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#FEFEFA] hover:bg-[#EAE8E3] active:scale-95 border border-[#CCD6CF] hover:border-[#56615a] rounded-full text-xs font-semibold text-[#1b1c1c] transition-all shadow-2xs cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <span>Alex (Stanford)</span>
+              </button>
+            </div>
           </div>
         </section>
 

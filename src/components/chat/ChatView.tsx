@@ -36,6 +36,9 @@ import {
   Copy,
   Forward,
   Pencil,
+  Eye,
+  AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { CreateGroupModal } from './CreateGroupModal';
 import { GroupInfoDrawer } from './GroupInfoDrawer';
@@ -48,6 +51,7 @@ import { EditProfileModal } from './EditProfileModal';
 import { EditFriendNameModal } from './EditFriendNameModal';
 import { ForwardMaterialMultiModal } from './ForwardMaterialMultiModal';
 import { MemberContextMenu, TargetMemberInfo } from './MemberContextMenu';
+import { MessageInfoModal } from './MessageInfoModal';
 
 interface ChatViewProps {
   currentUser: User;
@@ -85,8 +89,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onBack,
 }) => {
   // State: Conversations list & Active Conversation
+  const chatStorageKey = `as_active_chat_group_${currentUser.id}_${activeClassroomId}`;
   const [groups, setGroups] = useState<ChatGroup[]>([]);
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
+    try {
+      return typeof window !== 'undefined' ? window.localStorage.getItem(chatStorageKey) : null;
+    } catch {
+      return null;
+    }
+  });
   const [activeGroupDetails, setActiveGroupDetails] = useState<
     (ChatGroup & { members: ChatGroupMember[] }) | null
   >(null);
@@ -154,6 +165,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
     });
   };
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
+  const [messageInfoTarget, setMessageInfoTarget] = useState<ChatMessage | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const [isInChatSearchOpen, setIsInChatSearchOpen] = useState(false);
   const [inChatSearchQuery, setInChatSearchQuery] = useState('');
@@ -162,6 +175,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const showToast = (text: string) => {
     setToastMessage(text);
     setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const getChatHeaders = (includeJson = false): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'x-user-id': currentUser.id,
+      'x-user-name': currentUser.name,
+      'x-user-role': currentUser.role,
+      'x-user-email': currentUser.email,
+    };
+    if (includeJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+    return headers;
   };
 
   // Real-time State
@@ -187,43 +213,54 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // Refs
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const inputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const activeGroupIdRef = useRef<string | null>(activeGroupId);
 
   useEffect(() => {
     activeGroupIdRef.current = activeGroupId;
   }, [activeGroupId]);
 
-  const getAuthHeaders = () => ({
-    'Content-Type': 'application/json',
-    'x-user-id': currentUser.id,
-    'x-user-name': currentUser.name,
-    'x-user-role': currentUser.role,
-  });
-
   // 1. Fetch Conversations List
   const fetchGroups = async () => {
     try {
       const res = await fetch(
         `/api/chat/groups?classroomId=${activeClassroomId}&userId=${currentUser.id}`,
-        {
-          headers: {
-            'x-user-id': currentUser.id,
-            'x-user-name': currentUser.name,
-            'x-user-role': currentUser.role,
-          },
-        }
+        { headers: getChatHeaders() }
       );
       if (res.ok) {
-        const data = await res.json();
+        const data: ChatGroup[] = await res.json();
         setGroups(data);
-        if (!activeGroupIdRef.current && data.length > 0) {
-          setActiveGroupId(data[0].id);
+        if (data.length > 0) {
+          const savedId =
+            typeof window !== 'undefined' ? window.localStorage.getItem(chatStorageKey) : null;
+          if (activeGroupIdRef.current && data.some((g) => g.id === activeGroupIdRef.current)) {
+            return;
+          }
+          if (savedId && data.some((g) => g.id === savedId)) {
+            setActiveGroupId(savedId);
+          } else {
+            setActiveGroupId(data[0].id);
+          }
+        } else {
+          setActiveGroupId(null);
         }
       }
     } catch (err) {
       console.error('Error fetching chat groups:', err);
     }
   };
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (activeGroupId) {
+          window.localStorage.setItem(chatStorageKey, activeGroupId);
+        } else {
+          window.localStorage.removeItem(chatStorageKey);
+        }
+      }
+    } catch {}
+  }, [activeGroupId, chatStorageKey]);
 
   useEffect(() => {
     fetchGroups();
@@ -240,14 +277,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // 2. Fetch Active Group Details & Messages
   const fetchActiveConversation = async (groupId: string) => {
     try {
-      const authH = {
-        'x-user-id': currentUser.id,
-        'x-user-name': currentUser.name,
-        'x-user-role': currentUser.role,
-      };
       const [groupRes, msgsRes] = await Promise.all([
-        fetch(`/api/chat/groups/${groupId}`, { headers: authH }),
-        fetch(`/api/chat/groups/${groupId}/messages`, { headers: authH }),
+        fetch(`/api/chat/groups/${groupId}`, { headers: getChatHeaders() }),
+        fetch(`/api/chat/groups/${groupId}/messages`, { headers: getChatHeaders() }),
       ]);
 
       if (groupRes.ok) {
@@ -270,6 +302,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (activeGroupId) {
       fetchActiveConversation(activeGroupId);
       setTypingUsers(new Map());
+      if (editingMessage) {
+        setInputText('');
+      }
+      setEditingMessage(null);
+      setReplyingTo(null);
     }
   }, [activeGroupId]);
 
@@ -277,12 +314,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       await fetch(`/api/chat/groups/${groupId}/read`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id,
-          'x-user-name': currentUser.name,
-          'x-user-role': currentUser.role,
-        },
+        headers: getChatHeaders(),
       });
       // update unreadCount in local group list
       setGroups((prev) =>
@@ -348,10 +380,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
             // If message is in current open group
             if (newMsg.groupId === currentActiveId) {
               setMessages((prev) => {
+                if (data.clientTempId) {
+                  const hasTemp = prev.some((m) => m.id === data.clientTempId);
+                  if (hasTemp) {
+                    return prev.map((m) => (m.id === data.clientTempId ? newMsg : m));
+                  }
+                }
                 if (prev.some((m) => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
               });
-              markGroupAsRead(newMsg.groupId);
+              if (newMsg.senderId !== currentUser.id) {
+                markGroupAsRead(newMsg.groupId);
+              }
+            } else if (
+              newMsg.senderId !== currentUser.id &&
+              wsRef.current &&
+              wsRef.current.readyState === WebSocket.OPEN
+            ) {
+              // Acknowledge delivery for inactive chats without marking as read
+              wsRef.current.send(
+                JSON.stringify({
+                  type: 'delivered',
+                  groupId: newMsg.groupId,
+                  userId: currentUser.id,
+                  messageId: newMsg.id,
+                })
+              );
             }
 
             // Update sidebar preview and auto-fetch if new group
@@ -400,17 +454,58 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 return updated;
               });
             }
-          } else if (data.type === 'chat:read_receipt') {
+          } else if (data.type === 'chat:delivered_receipt') {
             if (data.groupId === currentActiveId) {
+              const targetIds = Array.isArray(data.messageIds)
+                ? new Set<string>(data.messageIds)
+                : null;
               setMessages((prev) =>
                 prev.map((m) => {
-                  if (!m.readBy.includes(data.userId)) {
-                    return { ...m, readBy: [...m.readBy, data.userId] };
+                  if (targetIds && !targetIds.has(m.id)) return m;
+                  if (!m.deliveredTo.includes(data.userId)) {
+                    return { ...m, deliveredTo: [...m.deliveredTo, data.userId] };
                   }
                   return m;
                 })
               );
             }
+          } else if (data.type === 'chat:read_receipt') {
+            if (data.groupId === currentActiveId) {
+              const targetIds = Array.isArray(data.messageIds)
+                ? new Set<string>(data.messageIds)
+                : null;
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (targetIds && !targetIds.has(m.id)) return m;
+                  const nextRead = m.readBy.includes(data.userId)
+                    ? m.readBy
+                    : [...m.readBy, data.userId];
+                  const nextDelivered = m.deliveredTo.includes(data.userId)
+                    ? m.deliveredTo
+                    : [...m.deliveredTo, data.userId];
+                  if (nextRead !== m.readBy || nextDelivered !== m.deliveredTo) {
+                    return { ...m, readBy: nextRead, deliveredTo: nextDelivered };
+                  }
+                  return m;
+                })
+              );
+            }
+          } else if (data.type === 'chat:message_edited') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId
+                    ? {
+                        ...m,
+                        content: data.content,
+                        isEdited: true,
+                        editedAt: data.editedAt,
+                      }
+                    : m
+                )
+              );
+            }
+            fetchGroups();
           } else if (data.type === 'chat:message_reaction') {
             if (data.groupId === currentActiveId) {
               setMessages((prev) =>
@@ -561,31 +656,91 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
-  // 4. Send Message Handler
-  const handleSendMessage = async (payload: {
-    type?: 'text' | 'file' | 'camera_image' | 'material_forward';
-    content?: string;
-    fileUrl?: string;
-    fileName?: string;
-    fileSize?: string;
-    forwardedMaterial?: ForwardedMaterialInfo;
-  }) => {
+  // 4. Send Message Handler (Optimistic Pending -> Single/Double Tick upon Server Registration)
+  const handleSendMessage = async (
+    payload: {
+      type?: 'text' | 'file' | 'camera_image' | 'material_forward';
+      content?: string;
+      fileUrl?: string;
+      fileName?: string;
+      fileSize?: string;
+      forwardedMaterial?: ForwardedMaterialInfo;
+    },
+    retryMsg?: ChatMessage
+  ) => {
     if (!activeGroupId) return;
 
-    try {
-      const replyToPayload = replyingTo
-        ? {
-            id: replyingTo.id,
-            senderName: replyingTo.senderName,
-            content: replyingTo.content || (replyingTo.fileName ? `📎 ${replyingTo.fileName}` : 'Attachment'),
-            type: replyingTo.type,
-          }
-        : undefined;
+    const tempId =
+      retryMsg?.id || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const replyToPayload = retryMsg?.replyTo
+      ? retryMsg.replyTo
+      : replyingTo
+      ? {
+          id: replyingTo.id,
+          senderName: replyingTo.senderName,
+          content: replyingTo.content || (replyingTo.fileName ? `📎 ${replyingTo.fileName}` : 'Attachment'),
+          type: replyingTo.type,
+        }
+      : undefined;
 
+    const now = new Date();
+    const optimisticMsg: ChatMessage = retryMsg
+      ? { ...retryMsg, isPending: true, isFailed: false }
+      : {
+          id: tempId,
+          groupId: activeGroupId,
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderAvatar: currentUser.avatar,
+          type: payload.type || 'text',
+          content: (payload.content || '').trim(),
+          fileUrl: payload.fileUrl,
+          fileName: payload.fileName,
+          fileSize: payload.fileSize,
+          forwardedMaterial: payload.forwardedMaterial,
+          replyTo: replyToPayload,
+          reactions: [],
+          timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          createdAt: Date.now(),
+          deliveredTo: [],
+          readBy: [],
+          isPending: true,
+          isFailed: false,
+        };
+
+    setMessages((prev) => {
+      if (retryMsg) {
+        return prev.map((m) => (m.id === tempId ? optimisticMsg : m));
+      }
+      return [...prev, optimisticMsg];
+    });
+
+    if (!retryMsg) {
+      setInputText('');
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
+      setShowAttachMenu(false);
+    }
+
+    // Turn off typing
+    if (isTyping && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setIsTyping(false);
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'typing',
+          groupId: activeGroupId,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          isTyping: false,
+        })
+      );
+    }
+
+    try {
       const res = await fetch(`/api/chat/groups/${activeGroupId}/messages`, {
         method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ...payload, replyTo: replyToPayload }),
+        headers: getChatHeaders(true),
+        body: JSON.stringify({ ...payload, replyTo: replyToPayload, clientTempId: tempId }),
       });
 
       if (!res.ok) {
@@ -596,33 +751,99 @@ export const ChatView: React.FC<ChatViewProps> = ({
       }
 
       if (res.ok) {
-        const newMsg = await res.json();
-        // Optimistically add to state if not already received via WS
+        const newMsg: ChatMessage = await res.json();
         setMessages((prev) => {
-          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          const alreadyHasReal = prev.some((m) => m.id === newMsg.id);
+          if (alreadyHasReal) {
+            return prev.filter((m) => m.id !== tempId);
+          }
+          const hasTemp = prev.some((m) => m.id === tempId);
+          if (hasTemp) {
+            return prev.map((m) => (m.id === tempId ? newMsg : m));
+          }
           return [...prev, newMsg];
         });
-        setInputText('');
-        setReplyingTo(null);
-        setShowEmojiPicker(false);
-        setShowAttachMenu(false);
-
-        // Turn off typing
-        if (isTyping && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          setIsTyping(false);
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'typing',
-              groupId: activeGroupId,
-              userId: currentUser.id,
-              userName: currentUser.name,
-              isTyping: false,
-            })
-          );
-        }
+        fetchGroups();
+      } else {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, isPending: false, isFailed: true } : m))
+        );
       }
     } catch (err) {
       console.error('Failed to send message:', err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, isPending: false, isFailed: true } : m))
+      );
+    }
+  };
+
+  // 4a. Edit Message Handlers
+  const handleStartEdit = (msg: ChatMessage) => {
+    setReplyingTo(null);
+    setEditingMessage(msg);
+    setInputText(msg.content);
+    setTimeout(() => inputTextareaRef.current?.focus(), 0);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setInputText('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage) return;
+    const trimmed = inputText.trim();
+    if (!trimmed) {
+      showToast('Edited message cannot be empty.');
+      return;
+    }
+
+    if (trimmed === editingMessage.content.trim()) {
+      handleCancelEdit();
+      return;
+    }
+
+    const targetId = editingMessage.id;
+    const targetGroupId = editingMessage.groupId;
+    try {
+      const res = await fetch(`/api/chat/messages/${targetId}`, {
+        method: 'PATCH',
+        headers: getChatHeaders(true),
+        body: JSON.stringify({ content: trimmed, groupId: targetGroupId }),
+      });
+
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = {};
+      }
+
+      if (res.ok) {
+        const updatedMsg = data.message;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === targetId
+              ? {
+                  ...m,
+                  content: updatedMsg?.content ?? trimmed,
+                  isEdited: true,
+                  editedAt: updatedMsg?.editedAt ?? Date.now(),
+                }
+              : m
+          )
+        );
+        setEditingMessage(null);
+        setInputText('');
+        fetchGroups();
+        showToast('Message edited');
+      } else {
+        showToast(data.error || `Failed to edit message (HTTP ${res.status}).`);
+      }
+    } catch (err) {
+      console.error('Failed to edit message:', err);
+      showToast('Network error while editing message.');
     }
   };
 
@@ -631,7 +852,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/react`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(true),
         body: JSON.stringify({ emoji }),
       });
       if (res.ok) {
@@ -650,7 +871,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/pin`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -672,7 +893,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msg.id}/star`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -700,7 +921,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/messages/forward', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(true),
         body: JSON.stringify({ messageId, targetGroupIds }),
       });
       if (res.ok) {
@@ -740,10 +961,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const handleSendText = () => {
     if (!inputText.trim()) return;
+    if (editingMessage) {
+      void handleSaveEdit();
+      return;
+    }
     handleSendMessage({ type: 'text', content: inputText.trim() });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && editingMessage) {
+      e.preventDefault();
+      handleCancelEdit();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendText();
@@ -801,7 +1031,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/messages/${msgId}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(),
       });
       if (res.ok) {
         setMessages((prev) =>
@@ -828,7 +1058,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/direct', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(true),
         body: JSON.stringify({ targetUserId, classroomId: activeClassroomId }),
       });
       if (res.ok) {
@@ -849,7 +1079,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     const res = await fetch('/api/chat/groups', {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(true),
       body: JSON.stringify({ ...groupData, classroomId: activeClassroomId }),
     });
     if (res.ok) {
@@ -868,7 +1098,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/users/profile', {
         method: 'PATCH',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(true),
         body: JSON.stringify(updated),
       });
       if (res.ok) {
@@ -896,7 +1126,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch('/api/chat/friend-name', {
         method: 'PATCH',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(true),
         body: JSON.stringify({ targetUserId, name: newName, groupId: groupId || activeGroupId }),
       });
       if (res.ok) {
@@ -942,7 +1172,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     await fetch(`/api/chat/groups/${activeGroupId}`, {
       method: 'PATCH',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(true),
       body: JSON.stringify(updates),
     });
     fetchGroups();
@@ -953,7 +1183,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(true),
       body: JSON.stringify({ memberIds }),
     });
     fetchActiveConversation(activeGroupId);
@@ -963,7 +1193,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(),
     });
     fetchActiveConversation(activeGroupId);
     showToast('Member removed from group.');
@@ -974,7 +1204,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}/ban`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(),
       });
       if (res.ok) {
         fetchActiveConversation(activeGroupId);
@@ -992,7 +1222,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       const res = await fetch(`/api/members/${userId}/ban`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getChatHeaders(),
       });
       if (res.ok) {
         showToast(`Permanently banned ${userName || 'member'} from cohort.`);
@@ -1011,7 +1241,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${userId}/role`, {
       method: 'PATCH',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(true),
       body: JSON.stringify({ role: newRole }),
     });
     fetchActiveConversation(activeGroupId);
@@ -1021,7 +1251,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(),
     });
     setIsInfoDrawerOpen(false);
     setActiveGroupId(null);
@@ -1033,7 +1263,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (!activeGroupId) return;
     await fetch(`/api/chat/groups/${activeGroupId}/members/${currentUser.id}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
+      headers: getChatHeaders(),
     });
     setIsInfoDrawerOpen(false);
     setActiveGroupId(null);
@@ -1547,25 +1777,63 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     <p className="text-xs mt-1">Send a message, photo, or study notes to begin!</p>
                   </div>
                 ) : (
-                  (inChatSearchQuery.trim()
-                    ? messages.filter((m) =>
-                        m.content.toLowerCase().includes(inChatSearchQuery.toLowerCase()) ||
-                        (m.fileName && m.fileName.toLowerCase().includes(inChatSearchQuery.toLowerCase())) ||
-                        (m.forwardedMaterial?.title &&
-                          m.forwardedMaterial.title.toLowerCase().includes(inChatSearchQuery.toLowerCase()))
-                      )
-                    : messages
-                  ).map((msg, index) => {
-                    const isSelf = msg.senderId === currentUser.id;
-                    const prevMsg = messages[index - 1];
-                    const showDateHeader =
-                      !prevMsg ||
-                      formatMessageDate(prevMsg.createdAt) !== formatMessageDate(msg.createdAt);
+                  (() => {
+                    const visibleMessages = inChatSearchQuery.trim()
+                      ? messages.filter(
+                          (m) =>
+                            m.content.toLowerCase().includes(inChatSearchQuery.toLowerCase()) ||
+                            (m.fileName &&
+                              m.fileName.toLowerCase().includes(inChatSearchQuery.toLowerCase())) ||
+                            (m.forwardedMaterial?.title &&
+                              m.forwardedMaterial.title
+                                .toLowerCase()
+                                .includes(inChatSearchQuery.toLowerCase()))
+                        )
+                      : messages;
 
-                    const isReadByOthers =
-                      msg.readBy.filter((id) => id !== currentUser.id).length > 0;
-                    const isDeliveredToOthers =
-                      msg.deliveredTo && msg.deliveredTo.filter((id) => id !== currentUser.id).length > 0;
+                    return visibleMessages.map((msg, index) => {
+                      const isSelf = msg.senderId === currentUser.id;
+                      const prevMsg = visibleMessages[index - 1];
+                      const showDateHeader =
+                        !prevMsg ||
+                        formatMessageDate(prevMsg.createdAt) !== formatMessageDate(msg.createdAt);
+
+                    const memberIds =
+                      activeGroupDetails &&
+                      activeGroupDetails.id === activeGroupId &&
+                      activeGroupDetails.members.length > 0
+                        ? activeGroupDetails.members.map((m) => m.userId)
+                        : activeGroup?.memberIds || [];
+                    const recipientIds = memberIds.filter(
+                      (id) => id !== msg.senderId && id !== currentUser.id
+                    );
+
+                    const deliveryState = (() => {
+                      if (msg.isFailed) return 'failed' as const;
+                      if (msg.isPending) return 'pending' as const;
+
+                      if (activeGroup?.isDirect) {
+                        const recipientId = recipientIds[0];
+                        const isRead = recipientId
+                          ? msg.readBy.includes(recipientId)
+                          : msg.readBy.some((id) => id !== currentUser.id);
+                        if (isRead) return 'read' as const;
+                        const isDelivered = recipientId
+                          ? msg.deliveredTo.includes(recipientId)
+                          : msg.deliveredTo.some((id) => id !== currentUser.id);
+                        return isDelivered ? ('delivered' as const) : ('sent' as const);
+                      }
+
+                      if (recipientIds.length === 0) return 'sent' as const;
+                      const allRead = recipientIds.every((id) => msg.readBy.includes(id));
+                      if (allRead) return 'read' as const;
+                      const allDelivered = recipientIds.every((id) => msg.deliveredTo.includes(id));
+                      return allDelivered ? ('delivered' as const) : ('sent' as const);
+                    })();
+
+                    const seenByOthersCount = recipientIds.filter((id) =>
+                      msg.readBy.includes(id)
+                    ).length;
 
                     return (
                       <React.Fragment key={msg.id}>
@@ -1612,29 +1880,83 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           )}
 
                           <div
+                            onDoubleClick={() => {
+                              if (
+                                isSelf &&
+                                !msg.isDeleted &&
+                                !msg.isPending &&
+                                !msg.isFailed &&
+                                msg.type !== 'material_forward'
+                              ) {
+                                handleStartEdit(msg);
+                              }
+                            }}
                             className={`relative max-w-[88%] sm:max-w-lg md:max-w-xl xl:max-w-2xl rounded-2xl p-3.5 md:p-4 shadow-xs transition-all ${
                               isSelf
                                 ? 'bg-[#d9e6dc] text-[#1b1c1c] rounded-br-xs border border-[#b2beb5]/50'
                                 : 'bg-white text-[#1b1c1c] rounded-bl-xs border border-[#E5E4E2]'
                             }`}
                           >
-                            {/* WhatsApp Dropdown Options Trigger Button */}
-                            {!msg.isDeleted && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setContextMenuState({
-                                    isOpen: true,
-                                    position: { x: rect.left, y: rect.bottom + 4 },
-                                    message: msg,
-                                  });
-                                }}
-                                className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-0.5 text-[#54656f] hover:text-[#1b1c1c] bg-white/80 hover:bg-white rounded-full transition-opacity shadow-2xs cursor-pointer z-10"
-                                title="Message options"
-                              >
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              </button>
+                            {/* Floating Hover Action Toolbar (Never overlaps bubble text) */}
+                            {!msg.isDeleted && !msg.isPending && !msg.isFailed && (
+                              <div className="absolute -top-3.5 right-2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 bg-white border border-[#E5E4E2] rounded-full px-1.5 py-0.5 shadow-sm transition-opacity z-20">
+                                {isSelf && msg.type !== 'material_forward' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStartEdit(msg);
+                                    }}
+                                    className="p-1 text-[#56615a] hover:text-[#008069] rounded-full hover:bg-[#F0EDED] transition-colors cursor-pointer"
+                                    title="Edit Message (or double-click)"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {!activeGroup.isDirect && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setMessageInfoTarget(msg);
+                                    }}
+                                    className="p-1 text-[#56615a] hover:text-[#0284c7] rounded-full hover:bg-[#F0EDED] transition-colors cursor-pointer"
+                                    title="Seen by / Message Info"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {(isSelf ||
+                                  (activeGroupDetails?.adminIds || []).includes(currentUser.id)) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteMessage(msg.id);
+                                    }}
+                                    className="p-1 text-[#56615a] hover:text-red-600 rounded-full hover:bg-red-50 transition-colors cursor-pointer"
+                                    title="Delete Message"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setContextMenuState({
+                                      isOpen: true,
+                                      position: { x: rect.left, y: rect.bottom + 4 },
+                                      message: msg,
+                                    });
+                                  }}
+                                  className="p-1 text-[#54656f] hover:text-[#1b1c1c] rounded-full hover:bg-[#F0EDED] transition-colors cursor-pointer"
+                                  title="More message options"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             )}
 
                             {/* Sender Name in Group Chat */}
@@ -1812,7 +2134,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                               </p>
                             )}
 
-                            {/* Message Footer: Timestamp, Star, Pin & Delivery Status */}
+                            {/* Message Footer: Edited, Timestamp, Star, Pin & Delivery Status */}
                             <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[11px] md:text-xs text-[#737874]">
                               {msg.isPinned && (
                                 <span title="Pinned message">
@@ -1824,18 +2146,93 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                   <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 inline" />
                                 </span>
                               )}
+                              {msg.isEdited && !msg.isDeleted && (
+                                <span
+                                  className="text-[10px] md:text-[11px] italic text-[#56615a] font-medium"
+                                  title={
+                                    msg.editedAt
+                                      ? `Edited at ${new Date(msg.editedAt).toLocaleTimeString([], {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })}`
+                                      : 'Edited'
+                                  }
+                                >
+                                  Edited
+                                </span>
+                              )}
                               <span>{msg.timestamp}</span>
                               {isSelf && (
-                                <span
-                                  className="ml-0.5"
-                                  title={isReadByOthers ? 'Read' : isDeliveredToOthers ? 'Delivered' : 'Sent'}
-                                >
-                                  {isReadByOthers ? (
-                                    <CheckCheck className="w-4 h-4 text-blue-600 stroke-[2.5]" />
-                                  ) : isDeliveredToOthers ? (
-                                    <CheckCheck className="w-4 h-4 text-[#737874]" />
+                                <span className="ml-0.5 inline-flex items-center gap-1">
+                                  {deliveryState === 'pending' ? (
+                                    <span className="text-[10px] italic text-[#737874]" title="Sending...">
+                                      Sending…
+                                    </span>
+                                  ) : deliveryState === 'failed' ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleSendMessage(
+                                          {
+                                            type: msg.type,
+                                            content: msg.content,
+                                            fileUrl: msg.fileUrl,
+                                            fileName: msg.fileName,
+                                            fileSize: msg.fileSize,
+                                            forwardedMaterial: msg.forwardedMaterial,
+                                          },
+                                          msg
+                                        );
+                                      }}
+                                      className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+                                      title="Message not sent — click to retry"
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5" />
+                                      <span>Retry</span>
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  ) : !activeGroup?.isDirect && !msg.isDeleted ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setMessageInfoTarget(msg);
+                                      }}
+                                      className="inline-flex items-center gap-1 hover:bg-black/5 px-1 py-0.5 rounded transition-colors cursor-pointer"
+                                      title="Click to see who has seen & received this message"
+                                    >
+                                      {deliveryState === 'read' ? (
+                                        <CheckCheck className="w-4 h-4 text-[#0284c7] stroke-[2.5] transition-colors duration-300" />
+                                      ) : deliveryState === 'delivered' ? (
+                                        <CheckCheck className="w-4 h-4 text-[#737874] transition-colors duration-300" />
+                                      ) : (
+                                        <Check className="w-4 h-4 text-[#737874] transition-colors duration-300" />
+                                      )}
+                                      {seenByOthersCount > 0 && (
+                                        <span className="text-[10px] font-semibold text-[#56615a] inline-flex items-center gap-0.5">
+                                          <Eye className="w-3 h-3" />
+                                          {seenByOthersCount === recipientIds.length
+                                            ? 'All'
+                                            : seenByOthersCount}
+                                        </span>
+                                      )}
+                                    </button>
+                                  ) : deliveryState === 'read' ? (
+                                    <CheckCheck
+                                      className="w-4 h-4 text-[#0284c7] stroke-[2.5] transition-colors duration-300"
+                                      title="Read"
+                                    />
+                                  ) : deliveryState === 'delivered' ? (
+                                    <CheckCheck
+                                      className="w-4 h-4 text-[#737874] transition-colors duration-300"
+                                      title="Delivered"
+                                    />
                                   ) : (
-                                    <Check className="w-4 h-4 text-[#737874]" />
+                                    <Check
+                                      className="w-4 h-4 text-[#737874] transition-colors duration-300"
+                                      title="Sent (recipient offline)"
+                                    />
                                   )}
                                 </span>
                               )}
@@ -1867,23 +2264,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
                               </div>
                             )}
 
-                            {/* Delete Message Button for Sender or Admin */}
-                            {!msg.isDeleted &&
-                              (isSelf ||
-                                (activeGroupDetails?.adminIds || []).includes(currentUser.id)) && (
-                                <button
-                                  onClick={() => handleDeleteMessage(msg.id)}
-                                  className="absolute top-1 right-7 opacity-0 group-hover:opacity-100 p-1 text-[#737874] hover:text-red-600 bg-white/80 rounded-md transition-opacity shadow-xs cursor-pointer"
-                                  title="Delete Message"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              )}
                           </div>
                         </div>
                       </React.Fragment>
                     );
-                  })
+                  });
+                })()
                 )}
 
                 {/* Real-time Typing Indicator in Message Area */}
@@ -1916,6 +2302,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
                       {emoji}
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* Editing Banner */}
+              {editingMessage && (
+                <div className="px-4 py-2 bg-[#eef5f0] border-t border-[#c7dbd0] flex items-center justify-between animate-in slide-in-from-bottom-2 z-10">
+                  <div className="flex items-center gap-3 border-l-4 border-[#008069] pl-2.5 min-w-0">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-[#008069] flex items-center gap-1">
+                        <Pencil className="w-3 h-3" /> Editing message
+                      </div>
+                      <div className="text-xs text-[#54656f] truncate max-w-md">
+                        {editingMessage.content}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="w-6 h-6 rounded-full hover:bg-[#dce8e0] flex items-center justify-center text-[#56615a] cursor-pointer"
+                    title="Cancel edit (Esc)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
 
@@ -2037,24 +2446,34 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 {/* Textarea Input */}
                 <div className="flex-1 bg-white rounded-2xl border border-[#E5E4E2] focus-within:border-[#008069] shadow-xs px-4 py-2.5 flex items-center">
                   <textarea
+                    ref={inputTextareaRef}
                     id="chat-message-input"
                     rows={1}
                     value={inputText}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="Type a message (Press Enter to send, Shift+Enter for new line)..."
+                    placeholder={
+                      editingMessage
+                        ? 'Edit your message (Enter to save, Esc to cancel)...'
+                        : 'Type a message (Press Enter to send, Shift+Enter for new line)...'
+                    }
                     className="w-full text-sm md:text-[15px] text-[#1b1c1c] bg-transparent focus:outline-none resize-none max-h-28 scrollbar-thin"
                   />
                 </div>
 
-                {/* Send Button */}
+                {/* Send / Save Edit Button */}
                 <button
                   id="send-chat-message-btn"
                   onClick={handleSendText}
                   disabled={!inputText.trim()}
+                  title={editingMessage ? 'Save edited message' : 'Send message'}
                   className="w-11 h-11 rounded-full bg-[#008069] hover:bg-[#006e5a] text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:hover:bg-[#008069] cursor-pointer shadow-md flex-shrink-0"
                 >
-                  <Send className="w-5 h-5 ml-0.5" />
+                  {editingMessage ? (
+                    <Check className="w-5 h-5" />
+                  ) : (
+                    <Send className="w-5 h-5 ml-0.5" />
+                  )}
                 </button>
               </footer>
             </>
@@ -2129,14 +2548,30 @@ export const ChatView: React.FC<ChatViewProps> = ({
         message={contextMenuState.message}
         currentUser={currentUser}
         isGroupAdmin={(activeGroupDetails?.adminIds || []).includes(currentUser.id)}
+        isDirect={Boolean(activeGroup?.isDirect)}
         onClose={() => setContextMenuState((prev) => ({ ...prev, isOpen: false }))}
         onReply={(msg) => setReplyingTo(msg)}
+        onEdit={handleStartEdit}
+        onViewInfo={(msg) => setMessageInfoTarget(msg)}
         onCopy={handleCopyMessage}
         onReact={handleToggleReaction}
         onForward={(msg) => setForwardingMessage(msg)}
         onPin={handleTogglePin}
         onStar={handleToggleStar}
         onDelete={(msg) => handleDeleteMessage(msg.id)}
+      />
+
+      {/* Group Message Info / Seen By Modal */}
+      <MessageInfoModal
+        isOpen={Boolean(messageInfoTarget)}
+        message={
+          messageInfoTarget
+            ? messages.find((m) => m.id === messageInfoTarget.id) || messageInfoTarget
+            : null
+        }
+        members={activeGroupDetails?.members || []}
+        currentUserId={currentUser.id}
+        onClose={() => setMessageInfoTarget(null)}
       />
 
       {/* WhatsApp-Style Member Context Menu (Right-click on sender avatar/name or profile) */}

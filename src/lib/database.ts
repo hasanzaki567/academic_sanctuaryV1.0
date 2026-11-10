@@ -75,7 +75,10 @@ export async function fetchMaterialsFromDb(classroomId?: string, subjectId?: str
     if (subjectId) query = query.eq('subject_id', subjectId);
     const { data, error } = await query.order('created_at', { ascending: true });
     if (error || !data) return [];
-    return data.map((r) => rowToMaterial(r, classroomId));
+    const mapped = data.map((r) => rowToMaterial(r, classroomId));
+    return classroomId
+      ? mapped.filter((m) => !m.classroomId || m.classroomId === classroomId)
+      : mapped;
   } catch {
     return [];
   }

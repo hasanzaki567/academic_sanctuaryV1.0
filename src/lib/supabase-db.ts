@@ -142,6 +142,7 @@ export function rowToSubject(r: any): Subject {
 export function materialToRow(m: Material): any {
   return {
     id: m.id,
+    classroom_id: m.classroomId || null,
     subject_id: m.subjectId,
     subject_code: m.subjectCode,
     subject_name: m.subjectName,
@@ -167,6 +168,7 @@ export function materialToRow(m: Material): any {
 export function rowToMaterial(r: any, fallbackClassroomId?: string): Material {
   return {
     id: r.id,
+    classroomId: r.classroom_id || fallbackClassroomId || undefined,
     subjectId: r.subject_id,
     subjectCode: r.subject_code,
     subjectName: r.subject_name,
@@ -306,6 +308,7 @@ export function chatMessageToRow(m: ChatMessage): any {
     is_pinned: Boolean(m.isPinned),
     is_starred: Boolean(m.isStarred),
     starred_by: m.starredBy || [],
+    ...(m.isEdited ? { is_edited: true, edited_at: m.editedAt ?? Date.now() } : {}),
   };
 }
 
@@ -332,6 +335,8 @@ export function rowToChatMessage(r: any): ChatMessage {
     isPinned: Boolean(r.is_pinned),
     isStarred: Boolean(r.is_starred),
     starredBy: r.starred_by || [],
+    isEdited: Boolean(r.is_edited),
+    editedAt: r.edited_at ? Number(r.edited_at) : undefined,
   };
 }
 
@@ -686,16 +691,36 @@ export async function dbFetchChatMessages(groupId: string): Promise<ChatMessage[
   }
 }
 
+async function withEditColumnsFallback(
+  payload: Record<string, any>,
+  execute: (body: Record<string, any>) => PromiseLike<{ error: { message?: string } | null }>,
+  label: string
+): Promise<boolean> {
+  const { error } = await execute(payload);
+  if (!error) return true;
+
+  if (error.message?.includes('is_edited') || error.message?.includes('edited_at')) {
+    const { is_edited: _ie, edited_at: _ea, ...legacyPayload } = payload;
+    if (Object.keys(legacyPayload).length === 0) return true;
+    const retry = await execute(legacyPayload);
+    if (!retry.error) return true;
+    console.warn(`${label} warning:`, retry.error.message);
+    return false;
+  }
+
+  console.warn(`${label} warning:`, error.message);
+  return false;
+}
+
 export async function dbSaveChatMessage(m: ChatMessage): Promise<boolean> {
   try {
     const sb = getSupabase();
     const row = chatMessageToRow(m);
-    const { error } = await sb.from('chat_messages').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.warn('dbSaveChatMessage warning:', error.message);
-      return false;
-    }
-    return true;
+    return await withEditColumnsFallback(
+      row,
+      (body) => sb.from('chat_messages').upsert(body, { onConflict: 'id' }),
+      'dbSaveChatMessage'
+    );
   } catch (err) {
     console.warn('dbSaveChatMessage exception:', err);
     return false;
@@ -714,13 +739,16 @@ export async function dbUpdateChatMessage(id: string, patch: Partial<ChatMessage
     if (patch.deliveredTo !== undefined) rowPatch.delivered_to = patch.deliveredTo;
     if (patch.readBy !== undefined) rowPatch.read_by = patch.readBy;
     if (patch.isDeleted !== undefined) rowPatch.is_deleted = patch.isDeleted;
+    if (patch.isEdited !== undefined) rowPatch.is_edited = patch.isEdited;
+    if (patch.editedAt !== undefined) rowPatch.edited_at = patch.editedAt;
 
-    const { error } = await sb.from('chat_messages').update(rowPatch).eq('id', id);
-    if (error) {
-      console.warn('dbUpdateChatMessage warning:', error.message);
-      return false;
-    }
-    return true;
+    if (Object.keys(rowPatch).length === 0) return true;
+
+    return await withEditColumnsFallback(
+      rowPatch,
+      (body) => sb.from('chat_messages').update(body).eq('id', id),
+      'dbUpdateChatMessage'
+    );
   } catch (err) {
     console.warn('dbUpdateChatMessage exception:', err);
     return false;

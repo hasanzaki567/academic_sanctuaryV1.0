@@ -8,6 +8,8 @@ import {
   Star,
   Trash2,
   Plus,
+  Pencil,
+  Info,
 } from 'lucide-react';
 import { ChatMessage, User } from '../../types';
 
@@ -17,8 +19,11 @@ interface MessageContextMenuProps {
   message: ChatMessage | null;
   currentUser: User;
   isGroupAdmin: boolean;
+  isDirect?: boolean;
   onClose: () => void;
   onReply: (message: ChatMessage) => void;
+  onEdit?: (message: ChatMessage) => void;
+  onViewInfo?: (message: ChatMessage) => void;
   onCopy: (message: ChatMessage) => void;
   onReact: (message: ChatMessage, emoji: string) => void;
   onForward: (message: ChatMessage) => void;
@@ -40,8 +45,11 @@ export const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   message,
   currentUser,
   isGroupAdmin,
+  isDirect = false,
   onClose,
   onReply,
+  onEdit,
+  onViewInfo,
   onCopy,
   onReact,
   onForward,
@@ -84,7 +92,7 @@ export const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
 
   // Adjust coordinates to ensure the menu fits within the viewport
   const menuWidth = 280;
-  const menuHeight = 440;
+  const menuHeight = 560;
   const padding = 16;
 
   let posX = position.x;
@@ -100,6 +108,15 @@ export const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   }
 
   const isSelf = message.senderId === currentUser.id;
+  const canEdit =
+    isSelf &&
+    !message.isDeleted &&
+    !message.isPending &&
+    !message.isFailed &&
+    message.type !== 'material_forward' &&
+    Boolean(onEdit);
+  const canViewInfo =
+    !isDirect && !message.isDeleted && !message.isPending && !message.isFailed && Boolean(onViewInfo);
   const canDelete = isSelf || isGroupAdmin;
   const isStarred = Boolean(message.isStarred || (message.starredBy && message.starredBy.includes(currentUser.id)));
   const isPinned = Boolean(message.isPinned);
@@ -172,7 +189,7 @@ export const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
       {/* 2. WhatsApp-style Dropdown Menu Card (Matching Image 2) */}
       <div 
         id="context-menu-card"
-        className="w-64 sm:w-72 bg-white rounded-3xl shadow-2xl border-2 border-[#E5E4E2] py-2 flex flex-col text-sm sm:text-base text-[#1b1c1c] overflow-hidden"
+        className="w-64 sm:w-72 bg-white rounded-3xl shadow-2xl border-2 border-[#E5E4E2] py-2 flex flex-col text-sm sm:text-base text-[#1b1c1c] max-h-[calc(100vh-32px)] overflow-y-auto"
       >
         {/* Reply */}
         <button
@@ -186,6 +203,36 @@ export const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
           <Reply className="w-5 h-5 text-[#56615a]" />
           <span>Reply</span>
         </button>
+
+        {/* Edit (own messages) */}
+        {canEdit && (
+          <button
+            id="context-menu-edit"
+            onClick={() => {
+              onEdit?.(message);
+              onClose();
+            }}
+            className="px-4 py-3 hover:bg-[#F6F4F0] flex items-center gap-3.5 transition-colors text-left cursor-pointer font-bold"
+          >
+            <Pencil className="w-5 h-5 text-[#56615a]" />
+            <span>Edit</span>
+          </button>
+        )}
+
+        {/* Group Message Info / Seen By */}
+        {canViewInfo && (
+          <button
+            id="context-menu-info"
+            onClick={() => {
+              onViewInfo?.(message);
+              onClose();
+            }}
+            className="px-4 py-3 hover:bg-[#F6F4F0] flex items-center gap-3.5 transition-colors text-left cursor-pointer font-bold"
+          >
+            <Info className="w-5 h-5 text-[#56615a]" />
+            <span>Message Info (Seen by)</span>
+          </button>
+        )}
 
         {/* Copy */}
         <button

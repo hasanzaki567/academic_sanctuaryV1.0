@@ -137,6 +137,7 @@ export const ForwardMaterialMultiModal: React.FC<ForwardMaterialMultiModalProps>
   const handleConfirmForward = async () => {
     if (totalSelected === 0) return;
     setIsSubmitting(true);
+    setErrorMessage(null);
     try {
       const res = await fetch('/api/chat/materials/forward', {
         method: 'POST',
@@ -145,6 +146,7 @@ export const ForwardMaterialMultiModal: React.FC<ForwardMaterialMultiModalProps>
           'x-user-id': currentUser.id,
           'x-user-name': currentUser.name,
           'x-user-role': currentUser.role,
+          'x-user-email': currentUser.email,
         },
         body: JSON.stringify({
           material,
