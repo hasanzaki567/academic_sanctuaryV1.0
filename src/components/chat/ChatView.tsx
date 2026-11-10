@@ -214,6 +214,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeGroupIdRef = useRef<string | null>(activeGroupId);
+
+  useEffect(() => {
+    activeGroupIdRef.current = activeGroupId;
+  }, [activeGroupId]);
 
   // 1. Fetch Conversations List
   const fetchGroups = async () => {
@@ -228,7 +233,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         if (data.length > 0) {
           const savedId =
             typeof window !== 'undefined' ? window.localStorage.getItem(chatStorageKey) : null;
-          if (activeGroupId && data.some((g) => g.id === activeGroupId)) {
+          if (activeGroupIdRef.current && data.some((g) => g.id === activeGroupIdRef.current)) {
             return;
           }
           if (savedId && data.some((g) => g.id === savedId)) {
@@ -330,251 +335,285 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
-  // 3. WebSocket Real-Time Setup
+  // 3. Resilient WebSocket Real-Time Setup (No chat-switch thrashing, auto-reconnect, fallback polling)
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const socket = new WebSocket(wsUrl);
-    wsRef.current = socket;
+    let isUnmounted = false;
+    let reconnectTimer: any = null;
 
-    socket.onopen = () => {
-      // Authenticate socket session
-      socket.send(
-        JSON.stringify({
-          type: 'auth',
-          userId: currentUser.id,
-          classroomId: activeClassroomId,
-        })
-      );
-    };
+    const connectWebSocket = () => {
+      if (isUnmounted) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      const socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
 
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      socket.onopen = () => {
+        // Authenticate socket session
+        socket.send(
+          JSON.stringify({
+            type: 'auth',
+            userId: currentUser.id,
+            classroomId: activeClassroomId,
+          })
+        );
+      };
 
-        if (data.type === 'chat:online_users') {
-          setOnlineUserIds(new Set(data.onlineUserIds));
-        } else if (data.type === 'chat:presence') {
-          setOnlineUserIds((prev) => {
-            const next = new Set(prev);
-            if (data.isOnline) {
-              next.add(data.userId);
-            } else {
-              next.delete(data.userId);
-            }
-            return next;
-          });
-        } else if (data.type === 'chat:message_new') {
-          const newMsg: ChatMessage = data.message;
-          // If message is in current open group
-          if (newMsg.groupId === activeGroupId) {
-            setMessages((prev) => {
-              if (data.clientTempId) {
-                const hasTemp = prev.some((m) => m.id === data.clientTempId);
-                if (hasTemp) {
-                  return prev.map((m) => (m.id === data.clientTempId ? newMsg : m));
-                }
-              }
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-            if (newMsg.senderId !== currentUser.id) {
-              markGroupAsRead(newMsg.groupId);
-            }
-          } else if (
-            newMsg.senderId !== currentUser.id &&
-            wsRef.current &&
-            wsRef.current.readyState === WebSocket.OPEN
-          ) {
-            // Acknowledge delivery for inactive chats without marking as read
-            wsRef.current.send(
-              JSON.stringify({
-                type: 'delivered',
-                groupId: newMsg.groupId,
-                userId: currentUser.id,
-                messageId: newMsg.id,
-              })
-            );
-          }
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const currentActiveId = activeGroupIdRef.current;
 
-          // Update sidebar preview
-          setGroups((prev) => {
-            return prev.map((g) => {
-              if (g.id === newMsg.groupId) {
-                const unread =
-                  g.id === activeGroupId || newMsg.senderId === currentUser.id
-                    ? 0
-                    : (g.unreadCount || 0) + 1;
-                return {
-                  ...g,
-                  unreadCount: unread,
-                  lastMessage: {
-                    text:
-                      newMsg.type === 'material_forward'
-                        ? `📄 Forwarded: ${newMsg.forwardedMaterial?.title || 'Material'}`
-                        : newMsg.type === 'camera_image'
-                        ? '📷 Photo snapshot'
-                        : newMsg.type === 'file'
-                        ? `📎 File: ${newMsg.fileName || 'Attachment'}`
-                        : newMsg.content,
-                    timestamp: newMsg.timestamp,
-                    senderName: newMsg.senderName,
-                    senderId: newMsg.senderId,
-                    type: newMsg.type,
-                  },
-                };
-              }
-              return g;
-            });
-          });
-        } else if (data.type === 'chat:typing') {
-          if (data.groupId === activeGroupId && data.userId !== currentUser.id) {
-            setTypingUsers((prev) => {
-              const updated = new Map(prev);
-              if (data.isTyping) {
-                updated.set(data.userId, data.userName);
+          if (data.type === 'chat:online_users') {
+            setOnlineUserIds(new Set(data.onlineUserIds));
+          } else if (data.type === 'chat:presence') {
+            setOnlineUserIds((prev) => {
+              const next = new Set(prev);
+              if (data.isOnline) {
+                next.add(data.userId);
               } else {
-                updated.delete(data.userId);
+                next.delete(data.userId);
               }
-              return updated;
+              return next;
             });
-          }
-        } else if (data.type === 'chat:delivered_receipt') {
-          if (data.groupId === activeGroupId) {
-            const targetIds = Array.isArray(data.messageIds)
-              ? new Set<string>(data.messageIds)
-              : null;
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (targetIds && !targetIds.has(m.id)) return m;
-                if (!m.deliveredTo.includes(data.userId)) {
-                  return { ...m, deliveredTo: [...m.deliveredTo, data.userId] };
+          } else if (data.type === 'chat:message_new') {
+            const newMsg: ChatMessage = data.message;
+            // If message is in current open group
+            if (newMsg.groupId === currentActiveId) {
+              setMessages((prev) => {
+                if (data.clientTempId) {
+                  const hasTemp = prev.some((m) => m.id === data.clientTempId);
+                  if (hasTemp) {
+                    return prev.map((m) => (m.id === data.clientTempId ? newMsg : m));
+                  }
                 }
-                return m;
-              })
-            );
-          }
-        } else if (data.type === 'chat:read_receipt') {
-          if (data.groupId === activeGroupId) {
-            const targetIds = Array.isArray(data.messageIds)
-              ? new Set<string>(data.messageIds)
-              : null;
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (targetIds && !targetIds.has(m.id)) return m;
-                const nextRead = m.readBy.includes(data.userId)
-                  ? m.readBy
-                  : [...m.readBy, data.userId];
-                const nextDelivered = m.deliveredTo.includes(data.userId)
-                  ? m.deliveredTo
-                  : [...m.deliveredTo, data.userId];
-                if (nextRead !== m.readBy || nextDelivered !== m.deliveredTo) {
-                  return { ...m, readBy: nextRead, deliveredTo: nextDelivered };
-                }
-                return m;
-              })
-            );
-          }
-        } else if (data.type === 'chat:message_edited') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === data.messageId
-                  ? {
-                      ...m,
-                      content: data.content,
-                      isEdited: true,
-                      editedAt: data.editedAt,
-                    }
-                  : m
-              )
-            );
-          }
-          fetchGroups();
-        } else if (data.type === 'chat:message_reaction') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === data.messageId ? { ...m, reactions: data.reactions } : m
-              )
-            );
-          }
-        } else if (data.type === 'chat:message_pinned') {
-          if (data.groupId === activeGroupId) {
-            setMessages((prev) =>
-              prev.map((m) => ({
-                ...m,
-                isPinned: m.id === data.messageId ? data.isPinned : false,
-              }))
-            );
-            if (activeGroupDetails) {
-              setActiveGroupDetails((prev) =>
-                prev ? { ...prev, pinnedMessageId: data.isPinned ? data.messageId : undefined } : null
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+              });
+              if (newMsg.senderId !== currentUser.id) {
+                markGroupAsRead(newMsg.groupId);
+              }
+            } else if (
+              newMsg.senderId !== currentUser.id &&
+              wsRef.current &&
+              wsRef.current.readyState === WebSocket.OPEN
+            ) {
+              // Acknowledge delivery for inactive chats without marking as read
+              wsRef.current.send(
+                JSON.stringify({
+                  type: 'delivered',
+                  groupId: newMsg.groupId,
+                  userId: currentUser.id,
+                  messageId: newMsg.id,
+                })
               );
             }
-          }
-        } else if (data.type === 'chat:message_deleted') {
-          if (data.groupId === activeGroupId) {
+
+            // Update sidebar preview and auto-fetch if new group
+            setGroups((prev) => {
+              const exists = prev.some((g) => g.id === newMsg.groupId);
+              if (!exists) {
+                fetchGroups();
+              }
+              return prev.map((g) => {
+                if (g.id === newMsg.groupId) {
+                  const unread =
+                    g.id === currentActiveId || newMsg.senderId === currentUser.id
+                      ? 0
+                      : (g.unreadCount || 0) + 1;
+                  return {
+                    ...g,
+                    unreadCount: unread,
+                    lastMessage: {
+                      text:
+                        newMsg.type === 'material_forward'
+                          ? `📄 Forwarded: ${newMsg.forwardedMaterial?.title || 'Material'}`
+                          : newMsg.type === 'camera_image'
+                          ? '📷 Photo snapshot'
+                          : newMsg.type === 'file'
+                          ? `📎 File: ${newMsg.fileName || 'Attachment'}`
+                          : newMsg.content,
+                      timestamp: newMsg.timestamp,
+                      senderName: newMsg.senderName,
+                      senderId: newMsg.senderId,
+                      type: newMsg.type,
+                    },
+                  };
+                }
+                return g;
+              });
+            });
+          } else if (data.type === 'chat:typing') {
+            if (data.groupId === currentActiveId && data.userId !== currentUser.id) {
+              setTypingUsers((prev) => {
+                const updated = new Map(prev);
+                if (data.isTyping) {
+                  updated.set(data.userId, data.userName);
+                } else {
+                  updated.delete(data.userId);
+                }
+                return updated;
+              });
+            }
+          } else if (data.type === 'chat:delivered_receipt') {
+            if (data.groupId === currentActiveId) {
+              const targetIds = Array.isArray(data.messageIds)
+                ? new Set<string>(data.messageIds)
+                : null;
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (targetIds && !targetIds.has(m.id)) return m;
+                  if (!m.deliveredTo.includes(data.userId)) {
+                    return { ...m, deliveredTo: [...m.deliveredTo, data.userId] };
+                  }
+                  return m;
+                })
+              );
+            }
+          } else if (data.type === 'chat:read_receipt') {
+            if (data.groupId === currentActiveId) {
+              const targetIds = Array.isArray(data.messageIds)
+                ? new Set<string>(data.messageIds)
+                : null;
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (targetIds && !targetIds.has(m.id)) return m;
+                  const nextRead = m.readBy.includes(data.userId)
+                    ? m.readBy
+                    : [...m.readBy, data.userId];
+                  const nextDelivered = m.deliveredTo.includes(data.userId)
+                    ? m.deliveredTo
+                    : [...m.deliveredTo, data.userId];
+                  if (nextRead !== m.readBy || nextDelivered !== m.deliveredTo) {
+                    return { ...m, readBy: nextRead, deliveredTo: nextDelivered };
+                  }
+                  return m;
+                })
+              );
+            }
+          } else if (data.type === 'chat:message_edited') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId
+                    ? {
+                        ...m,
+                        content: data.content,
+                        isEdited: true,
+                        editedAt: data.editedAt,
+                      }
+                    : m
+                )
+              );
+            }
+            fetchGroups();
+          } else if (data.type === 'chat:message_reaction') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId ? { ...m, reactions: data.reactions } : m
+                )
+              );
+            }
+          } else if (data.type === 'chat:message_pinned') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) => ({
+                  ...m,
+                  isPinned: m.id === data.messageId ? data.isPinned : false,
+                }))
+              );
+              if (activeGroupDetails) {
+                setActiveGroupDetails((prev) =>
+                  prev ? { ...prev, pinnedMessageId: data.isPinned ? data.messageId : undefined } : null
+                );
+              }
+            }
+          } else if (data.type === 'chat:message_deleted') {
+            if (data.groupId === currentActiveId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === data.messageId
+                    ? {
+                        ...m,
+                        isDeleted: true,
+                        content: 'This message was deleted',
+                        fileUrl: undefined,
+                        forwardedMaterial: undefined,
+                      }
+                    : m
+                )
+              );
+            }
+          } else if (data.type === 'chat:user_profile_updated') {
+            if (data.userId === currentUser.id && onUpdateCurrentUser) {
+              onUpdateCurrentUser({ name: data.name, avatar: data.avatar });
+            }
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === data.messageId
-                  ? {
-                      ...m,
-                      isDeleted: true,
-                      content: 'This message was deleted',
-                      fileUrl: undefined,
-                      forwardedMaterial: undefined,
-                    }
+                m.senderId === data.userId
+                  ? { ...m, senderName: data.name, senderAvatar: data.avatar }
                   : m
               )
             );
+            fetchGroups();
+            if (currentActiveId) fetchActiveConversation(currentActiveId);
+          } else if (data.type === 'chat:friend_renamed') {
+            if (onUpdateFriendName) {
+              onUpdateFriendName(data.userId, data.newName);
+            }
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.senderId === data.userId ? { ...m, senderName: data.newName } : m
+              )
+            );
+            fetchGroups();
+            if (currentActiveId) fetchActiveConversation(currentActiveId);
+          } else if (
+            data.type === 'chat:group_created' ||
+            data.type === 'chat:group_updated' ||
+            data.type === 'chat:group_deleted' ||
+            data.type === 'chat:members_added' ||
+            data.type === 'chat:member_removed' ||
+            data.type === 'chat:role_changed'
+          ) {
+            fetchGroups();
+            if (currentActiveId) {
+              fetchActiveConversation(currentActiveId);
+            }
           }
-        } else if (data.type === 'chat:user_profile_updated') {
-          if (data.userId === currentUser.id && onUpdateCurrentUser) {
-            onUpdateCurrentUser({ name: data.name, avatar: data.avatar });
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.senderId === data.userId
-                ? { ...m, senderName: data.name, senderAvatar: data.avatar }
-                : m
-            )
-          );
-          fetchGroups();
-          if (activeGroupId) fetchActiveConversation(activeGroupId);
-        } else if (data.type === 'chat:friend_renamed') {
-          if (onUpdateFriendName) {
-            onUpdateFriendName(data.userId, data.newName);
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.senderId === data.userId ? { ...m, senderName: data.newName } : m
-            )
-          );
-          fetchGroups();
-          if (activeGroupId) fetchActiveConversation(activeGroupId);
-        } else if (
-          data.type === 'chat:group_created' ||
-          data.type === 'chat:group_updated' ||
-          data.type === 'chat:group_deleted' ||
-          data.type === 'chat:members_added' ||
-          data.type === 'chat:member_removed' ||
-          data.type === 'chat:role_changed'
-        ) {
-          fetchGroups();
-          if (activeGroupId) {
-            fetchActiveConversation(activeGroupId);
-          }
+        } catch (e) {
+          console.error('Error handling WebSocket message payload:', e);
         }
-      } catch (e) {
-        console.error('Error handling WebSocket message payload:', e);
-      }
+      };
+
+      socket.onclose = () => {
+        if (!isUnmounted) {
+          reconnectTimer = setTimeout(connectWebSocket, 3000);
+        }
+      };
     };
 
+    connectWebSocket();
+
+    // Fallback Polling Interval (every 6 seconds if WS is reconnecting or down)
+    const pollInterval = setInterval(() => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        if (activeGroupIdRef.current) {
+          fetchActiveConversation(activeGroupIdRef.current);
+        }
+        fetchGroups();
+      }
+    }, 6000);
+
     return () => {
-      socket.close();
+      isUnmounted = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(pollInterval);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
-  }, [activeClassroomId, currentUser.id, activeGroupId]);
+  }, [activeClassroomId, currentUser.id]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -703,6 +742,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
         headers: getChatHeaders(true),
         body: JSON.stringify({ ...payload, replyTo: replyToPayload, clientTempId: tempId }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error('Failed to send message:', errData);
+        showToast(errData.error || 'Failed to send message.');
+        return;
+      }
 
       if (res.ok) {
         const newMsg: ChatMessage = await res.json();
@@ -2146,7 +2192,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                       <span>Retry</span>
                                       <RotateCcw className="w-3 h-3" />
                                     </button>
-                                  ) : !activeGroup.isDirect && !msg.isDeleted ? (
+                                  ) : !activeGroup?.isDirect && !msg.isDeleted ? (
                                     <button
                                       type="button"
                                       onClick={(e) => {
